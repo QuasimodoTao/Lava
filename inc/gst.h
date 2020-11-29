@@ -1,0 +1,21 @@
+//Lava OS
+//PageFault
+//20-04-13-15-30
+
+#ifndef _GLOBAL_STRUCT_TYPE_H_
+#define _GLOBAL_STRUCT_TYPE_H_
+
+enum GST{
+	GST_UNDEF = 0,
+	GST_VM_MEMORY_BLOCK,
+	GST_TIMER,
+	GST_THREAD,
+	GST_PROCESS,
+	GST_SEMAPHORE,
+	GST_MUTEX,
+	GST_FILE
+	
+};
+
+
+#endif

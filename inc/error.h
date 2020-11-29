@@ -1,0 +1,25 @@
+//Lava OS
+//PageFault
+//20-09-19-21-26
+
+#ifndef _ERROR_H_
+#define _ERROR_H_
+
+enum ERROR_CODE {
+	ERR_INVAILD_PTR	=	1,
+	ERR_BAD_TYPE,
+	ERR_NO_MORE_MEMORY,
+	ERR_OUT_OF_RANGE,
+	ERR_UNSUPPOSE_CHAR,
+	ERR_UNSUPPOSE_MAP_TYPE,
+	ERR_RESOURCE_BUSY,
+	ERR_OUT_OF_TIME
+	
+	
+};
+
+#define IsInvaildPtr(ptr)	(((u64)(ptr)) >= 0x100000ULL)
+
+
+
+#endif

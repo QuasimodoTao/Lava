@@ -875,6 +875,7 @@ TestPCIEnd:
 	mov ecx,2048
 next_2M_page:
 	mov [edi],eax
+	mov dword [edi + 4],0
 	add eax,0x200000
 	lea edi,[edi + 8]
 	loop next_2M_page
