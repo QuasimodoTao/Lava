@@ -86,7 +86,7 @@ int main(int argc,const char * argv[]){
 	int name_len;
 	struct tm * time_struct;
 	time_t time_stamp;
-	int byte;
+	unsigned int byte = 0;
 	long long magic;
 	int array_count;
 	int struct_ptr_pos;

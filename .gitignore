@@ -1,1 +1,4 @@
 *.o
+*.exe
+*.bin
+arch/ap_entry.c
