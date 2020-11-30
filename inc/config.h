@@ -21,11 +21,11 @@
 #define _CONFIG_H_
 
 //adjustable
-#define FIRST_SELECTOR		0x10
 #define MAX_CPU_COUNT		32
-#define IPI_START_IRQ		0x90
+#define IRQ_START_INT       0x20       
+#define IPI_START_INT		0x50
 #define IPI_COUNT			0x10
-#define IRQ_COUNT			96
+#define IRQ_COUNT			48
 //#define VM_DEBUG
 #define IRQ_DE_CHECK
 #define CPU_TIME_UPDATA_IPI	0
@@ -33,79 +33,103 @@
 
 
 //const
-#define KERNEL_CS			(FIRST_SELECTOR)
-#define KERNEL_SS			(FIRST_SELECTOR + 0x08)
-#define USER_CS_32			(FIRST_SELECTOR + 0x10)
-#define USER_SS_32			(FIRST_SELECTOR + 0x18)
-#define USER_CS_64			(FIRST_SELECTOR + 0x20)
-#define USER_SS_64			(FIRST_SELECTOR + 0x28)
-//All physical page mapping at PMEMSTART to PMEMEND.
-//Thus,the system only suppose physical memory up to 64TB
+#define FIRST_SELECTOR		0x10                    
+#define KERNEL_CS			(FIRST_SELECTOR)        //GDT2
+#define KERNEL_SS			(FIRST_SELECTOR + 0x08) //GDT3
+#define USER_CS_32			(FIRST_SELECTOR + 0x10) //GDT4
+#define USER_SS_32			(FIRST_SELECTOR + 0x18) //GDT5
+#define USER_CS_64			(FIRST_SELECTOR + 0x20) //GDT6
+#define USER_SS_64			(FIRST_SELECTOR + 0x28) //GDT7
+//Physical address
+//0x00000000_00000000 - 0x00000000_000003ff
+//0x00000000_00000400 - 0x00000000_000004ff 256B BDA
+//0x00000000_00000500 - 0x00000000_000005ff 256B Original data area
+//0x00000000_00000600 - 0x00000000_000007ff 512B Int 0x?? * 256 For VM module
+#define VM_CALL_PROC_BASE   0x0000000000000600
+//0x00000000_00000800 - 0x00000000_000009ff 512B VESA information
+//0x00000000_00000a00 - 0x00000000_00000aff 256B Current VESA mode information
+//0x00000000_00000b00 - 0x00000000_00000bff 256B SMAP
+//0x00000000_00000c00 - 0x00000000_00000fff 1KB Reserved
+//0x00000000_00001000 - 0x00000000_000010ef 240B AP initlize code
+//0x00000000_000010f0 - 0x00000000_000010f7 8B Processors initlize mutex
+//0x00000000_000010f8 - 0x00000000_000010ff 8B SysPDBE addr
+//0x00000000_00001100 - 0x00000000_000011ff 256B Syscall Enter
+//0x00000000_00001200 - 0x00000000_000012ff 256B Sysenter Enter
+//0x00000000_00001300 - 0x00000000_000013ff 256B Syscall Int80 Enter DPL3
+//0x00000000_00001400 - 0x00000000_000014ff 256B Syscall Int81 Enter DPL3
+//0x00000000_00001500 - 0x00000000_000015ff 256B Syscall Int82 Enter DPL3
+//0x00000000_00001600 - 0x00000000_000016ff 256B Syscall Int83 Enter DPL3
+//0x00000000_00001700 - 0x00000000_000017ff 256B Syscall Int84 Enter DPL0
+//0x00000000_00001800 - 0x00000000_00001fff 2KB Reserved
+//0x00000000_00002000 - 0x00000000_00002fff 4KB PML4
+//0x00000000_00003000 - 0x00000000_00003fff 4KB PDPT
+//0x00000000_00004000 - 0x00000000_00004fff 4KB PDE0
+//0x00000000_00005000 - 0x00000000_00005fff 4KB PDE1
+//0x00000000_00006000 - 0x00000000_00006fff 4KB PDE2
+//0x00000000_00007000 - 0x00000000_00007fff 4KB PDE3
+//0x00000000_00008000 - 0x00000000_00008fff 4KB IDT
+#define PIDT_BASE           0x0000000000008000
+//0x00000000_00009000 - 0x00000000_0000afff 8KB GDT
+#define PGDT_BASE           0x0000000000009000
+//0x00000000_0000b000 - 0x00000000_0000ffff 20KB Stack init code
+//0x00000000_00010000 - 0x00000000_0008ffff 512KB For VM model
+#define VM_FREE_SPACE_START		0x10000
+#define VM_FREE_SPACE_SIZE		0x80000
+//0x00000000_00090000 - 0x00000000_00095fff 24KB For ISA/EISA DMA
+//0x00000000_00096000 - 0x00000000_0009fbff 39KB Reserved
+//0x00000000_0009fc00 - 0x00000000_0009ffff 1KB EBDA
+//0x00000000_000a0000 - 0x00000000_000bffff 128KB For Video
+//0x00000000_000c0000 - 0x00000000_000fffff 256KB For BIOS
+//0x00000000_00100000 - ?? Kernel image
+//?? - ?? Font
+//?? - ?? Config file
+
+//Virtual Address
+//0x00000000_00000000 - 0x00000000_3fffffff 1GB reserved
+//0x00000000_40000000 - 0x00000000_ffffffff 3GB User program image
+//0x00000001_00000000 - 0x000000ff_ffffffff 1020GB private dynamic library
+//0x00000100_00000000 - 0x000001ff_ffffffff 1024GB public dynamic library
+//0x00000200_00000000 - 0x000002ff_ffffffff 1024GB thread private heap
+//0x00000300_00000000 - 0x000003ff_ffffffff 1024GB thread public heap
+//0x00000400_00000000 - 0x00007eff_ffffffff ?? reserved
+//0x00007f00_00000000 - 0x00007fff_ffffefff 512GB - 4KB thread stack
+//0x00007fff_fffff000 - 0x00007fff_ffffffff 4KB For system and read only,mapping 0x1000
+#define USER_INIT_RSP               0x00007fffffffeff8
+#define USER_STACK_P4E_INDEX	    255
+//0xffff8000_00000000 - 0xffff807f_ffffffff 256GB Mapping all physical memory
 #define PMEMSTART	 	0xffff800000000000LL
-#define PMEMEND			0xffffbfffffffffffLL
+#define PMEMEND			0xffff807fffffffffLL
+#define IDT_BASE        (PIDT_BASE | PMEMSTART)
+#define GDT_BASE        (PGDT_BASE | PMEMSTART)
+//0xffff8080_00000000 - 0xffff8040_007fffff 8MB For thread list
+#define TLB             0xffff804000000000
+#define MAX_THREAD      1024*1024
+//0xffff8080_01000000 - 0xffff8040_01ffffff 16MB Kernel heap control base
+#define MMHMCBB			0xffff804001000000LL
+#define MMHMCBL			0xffff804001fffffcLL
+//0xffff8084_00000000 - 0xffff8047_ffffffff 16GB Kernel heap
+#define MMHSB			0xffff804400000000LL
 
-//Kernel Stack:Unswapable stack
-//1MB per stack,top 64KB exist,bottom 4KB not exist
-//Totoal 16384 Stack
-#define KSBA			0xffff800000001800LL
-//to 0xffffc00000002fff
-#define KSBV			0xffff800000001c00LL
-//to 0xffffc00000003fff
-#define KSB				0xffffc00800000000LL
-#define KSS				0x0000000000100000LL
-#define KST				8192
-
-#define TLB				0xffffc00000020000LL
-#define MAX_THREAD		16384
-
-//Paging:Allocatable page map.(0 is allocatable)
-#define PGADMB			0xffffc00080000000LL
-//Paging:Swapable page map.(0 is swapable)
-#define PGSDMB			0xffffc00100000000LL
-//Kernel Heap:page control block base
-#define MMHMCBB			0xffffc00001000000LL
-//Kernel Heap:last page control block
-#define MMHMCBL			0xffffc00001fffffcLL
-//Kernel Heap Base
-#define MMHSB			0xffffc00400000000LL
-//MMIO:All MMIO space map at there and set uncacheable
-//on suppose up to 512MB
-#define MMIOBASE		0xffffc00008000000LL
-#define MMIOSIZE		0x0000000010000000LL
-//CPU Private data page map at here
-#define SPEC_DATA_BASE	0xffffc00000100000LL
 //MP start up IPI vector
 #define AP_ENT_VECTOR			0x01
-#define AP_INIT_BASE			0xfffffffffffff000
-#define PROCESS_INIT_MUTEX		0xfffffffffffff0f0
-#define SYSPDBE_PTR				0xfffffffffffff0f8
-#define SYSCALL_ENTER			0xfffffffffffff100
-#define SYSENTER_ENTER			0xfffffffffffff200
-#define SYSCALL_INT_ENTER(x)	(0xfffffffffffff300 + 0x100 * ((x) - 0x80))
-
-#define SYSCALL_ENTER_CODE_START	0x00007ffffffff000
-#define SUPPOSE_SYSCALL_PTR	0x00007ffffffff0f0
-#define SUPPOSE_SYSENTER_PTR	0x00007ffffffff0f8
-
-#define VM_FREE_SPACE_START		0x10000
-#define VM_FREE_SPACE_SIZE		0x8fc00
-
+#define AP_INIT_BASE			((AP_ENT_VECTOR << 12) | PMEMSTART)
+#define PROCESS_INIT_MUTEX		((AP_ENT_VECTOR << 12) | PMEMSTART + 0x0f0)
+#define SYSCALL_ENTER			((AP_ENT_VECTOR << 12) | PMEMSTART + 0x100)
+#define SYSENTER_ENTER			((AP_ENT_VECTOR << 12) | PMEMSTART + 0x200)
+#define SYSCALL_80_ENTER        ((AP_ENT_VECTOR << 12) | PMEMSTART + 0x300)
+#define SYSCALL_81_ENTER        ((AP_ENT_VECTOR << 12) | PMEMSTART + 0x400)
+#define SYSCALL_82_ENTER        ((AP_ENT_VECTOR << 12) | PMEMSTART + 0x500)
+#define SYSCALL_83_ENTER        ((AP_ENT_VECTOR << 12) | PMEMSTART + 0x600)
+#define USER_SYSCALL_ENTER_CODE_START ((AP_ENT_VECTOR << 12) | PMEMSTART + 0x800)
+#define SUPPOSE_SYSCALL_PTR	    ((AP_ENT_VECTOR << 12) | PMEMSTART + 0x8f0)
+#define SUPPOSE_SYSENTER_PTR	((AP_ENT_VECTOR << 12) | PMEMSTART + 0x8f8)
+#define USER_SYSCALL_80_ENTER   ((AP_ENT_VECTOR << 12) | PMEMSTART + 0x900)
+#define USER_SYSCALL_81_ENTER   ((AP_ENT_VECTOR << 12) | PMEMSTART + 0x910)
+#define USER_SYSCALL_82_ENTER   ((AP_ENT_VECTOR << 12) | PMEMSTART + 0x920)
+#define USER_SYSCALL_83_ENTER   ((AP_ENT_VECTOR << 12) | PMEMSTART + 0x930)
 
 #define AHCI_PORT_SPACE_SIZE	512*1024
-
-#define GDT_BASE		0xffff800000009000LL
-//to 0xffffc0000000bfff
-#define IDT_BASE		0xffff800000008000LL
-//to 0xffffc00000004fff
-#define INT_ENT_BASE	0xffffffffffff0000LL
-//to 0xffffffffffffefff
-#define LAPIC_MMIO		0xffffc00000000000LL
-//to 0xffffc00000005fff
-#define MAX_IOAPIC		4
-#define IOAPIC_MMIO		0xffffc00000001000LL
-//to 0xffffc00000009fff
-
-#define USER_STACK_P4E_INDEX	255
+#define MAX_IOAPIC 8
 
 #define PAGE_SIZE_512G	0x0000008000000000LLU
 #define PAGE_SIZE_1G	0x0000000040000000LLU
@@ -139,13 +163,11 @@
 #define PAGE_IN_ADDR_MASK		PAGE_IN_ADDR_MASK_4K
 #define SWAP_ID_MASK			0x00000ffffffff000LL
 #define PAGE_BIT_MAP_MASK		0x0000ffffffffffc0LL
+
+#define MAX_P4E                 256
+
 #define PAGE_FIRST_MASK			0x01ff000000000000LL
 #define PAGE_FIRST_SHIFT		48
 
-#define VM_CALL_PROC_BASE		0x0000000000000600LL
-
-#define USER_INIT_RSP			0x00007fffffffeff8LL
-
-#define SYSTEM_CALL_PROC_BASE	0x00007ffffffff000LL
 
 #endif

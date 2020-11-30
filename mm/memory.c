@@ -88,12 +88,9 @@ static const struct SupBlk mem_sup[] = {
 
 static struct KMCB * first_useable[sizeof(mem_sup)/sizeof(struct SupBlk)];
 static struct KMCB * first_empty;
+static struct KMCB * last_block;
 static u32 lock;
 static u32 first_lock;
-static u32 stack_first_unswapable;
-static struct KMCB * last_block;
-
-static int stack_busy_count;
 static int heap_busy_count;
 
 #define HEAP_BUSY		0
@@ -106,62 +103,7 @@ spin_optr_def_bit(Heap,&lock,HEAP_BUSY);
 spin_optr_def_bit(List,&lock,HEAP_LIST_BUSY);
 spin_optr_def_bit(Empty,&lock,HEAP_EMPTY_BUSY);
 spin_optr_def_arg_bit(First,&first_lock,0);
-spin_optr_def_bit(Stack,&lock,STACK_BUSY);
 
-void * alloc_stack(){
-	u64 res, size, page;
-	u32 i;
-	
-	ID();//屏蔽中断避免中断发生
-	LockStack();//竞争以进入操作
-	if(stack_first_unswapable >= KST) {
-		UnlockStack();
-		IE();//允许中断
-		return NULL;
-	}
-	i = stack_first_unswapable;
-	res = KSB + stack_first_unswapable * KSS;
-	bts(kernel_unswapable_stack_mask,stack_first_unswapable);
-	size = KSS - 0x2000;
-	stack_first_unswapable++;
-	while(stack_first_unswapable < KST){
-		if(!bt(kernel_unswapable_stack_mask,stack_first_unswapable)) break;
-		stack_first_unswapable++;
-	}
-	UnlockStack();
-	if(bt(kernel_unswapable_stack_vaild_mask,i)) {
-		IE();//允许中断
-		return (void*)res;
-	}
-	allocate_area(NULL,res + size,0x2000,PAGE_EXIST | PAGE_WRITE);
-	allocate_area(NULL,res,size,PAGE_WRITE);
-	IE();//允许中断
-	return (void*)res;
-}
-void free_stack(void * _stack){
-	u64 stack;
-	
-	stack = (u64)_stack;
-	ID();
-	if(stack >= KSB && stack < KSB + KSS * KST){
-		//unswapable
-		stack -= KSB;
-		stack /= KSS;
-		LockStack();//竞争以进入操作
-		btr(kernel_unswapable_stack_mask,stack);
-		if(stack < stack_first_unswapable) stack_first_unswapable = stack;
-		UnlockStack();//释放锁
-	}
-	IE();
-}
-void ker_stack_init(){
-	put_page(get_free_page(0,0),NULL,kernel_unswapable_stack_mask);
-	memset(kernel_unswapable_stack_mask,0,KST/8);
-	memset(kernel_unswapable_stack_vaild_mask,0,KST/8);
-	stack_first_unswapable = 0;
-	stack_busy_count = 0;
-	UnlockStack();
-}
 static void search_next(){
 	struct KMCB * cur;
 	u64 count;

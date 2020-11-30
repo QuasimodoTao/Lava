@@ -43,64 +43,7 @@ int64_t LFSInit(int64_t MemoryStart,GUID * ActivePart);
 int mem_init(u64 MemoryStart,u64 MemoryEnd);
 void gui_init(u64 mode_info);
 
-u64 put_page_4K(u64 paddr,u64 vaddr,u64 memory_start){
-	u64 * p4,* p3,* p2,* p1;
-	u32 p4e,p3e,p2e,p1e;
-	
-	p4 = (u64*)(get_cr3() & 0xfffffffffffff000);
-	p4e = (vaddr >> 39) & 0x1ff;
-	if(!p4[p4e]) {
-		p4[p4e] = memory_start | 0x03;
-		p3 = (u64*)memory_start;
-		memory_start += 0x1000;
-		memset(p3,0,0x1000);
-	}
-	else p3 = (u64*)(p4[p4e] & 0xfffffffffffff000);
-	p3e = (vaddr >> 30) & 0x1ff;
-	if(!p3[p3e]){
-		p3[p3e] = memory_start | 0x03;
-		p2 = (u64*)memory_start;
-		memory_start += 0x1000;
-		memset(p2,0,0x1000);
-	}
-	else p2 = (u64*)(p3[p3e] & 0xfffffffffffff000);
-	p2e = (vaddr >> 21) & 0x1ff;
-	if(!p2[p2e]){
-		p2[p2e] = memory_start | 0x03;
-		p1 = (u64*)memory_start;
-		memory_start += 0x1000;
-		memset(p1,0,0x1000);
-	}
-	else p1 = (u64*)(p2[p2e] & 0xfffffffffffff000);
-	p1e = (vaddr >> 12) & 0x1ff;
-	p1[p1e] = paddr | 0x03;
-	return memory_start;
-}
-u64 put_page_2M(u64 paddr,u64 vaddr,u64 memory_start){
-	u64 * p4,* p3,* p2;
-	u32 p4e,p3e,p2e;
-	
-	p4 = (u64*)(get_cr3() & 0xfffffffffffff000);
-	p4e = (vaddr >> 39) & 0x1ff;
-	if(!p4[p4e]) {
-		p4[p4e] = memory_start | 0x03;
-		p3 = (u64*)memory_start;
-		memory_start += 0x1000;
-		memset(p3,0,0x1000);
-	}
-	else p3 = (u64*)(p4[p4e] & 0xfffffffffffff000);
-	p3e = (vaddr >> 30) & 0x1ff;
-	if(!p3[p3e]){
-		p3[p3e] = memory_start | 0x03;
-		p2 = (u64*)memory_start;
-		memory_start += 0x1000;
-		memset(p2,0,0x1000);
-	}
-	else p2 = (u64*)(p3[p3e] & 0xfffffffffffff000);
-	p2e = (vaddr >> 21) & 0x1ff;
-	p2[p2e] = paddr | 0x83;
-	return memory_start;
-}
+
 void __attribute__((noreturn)) EntryPoint(const struct _RELY_MSG_ * Msg){
 	int64_t MemoryStart;
 	struct _MSG_ * _Msg;
@@ -324,9 +267,9 @@ void __attribute__((noreturn)) EntryPoint(const struct _RELY_MSG_ * Msg){
 			print("Can not found kernel image.\n");
 			stop();	
 		}
-		_Msg->KernelImagePBase = 0x160000;
+		_Msg->KernelImagePBase = 0x100000;
 		Read(File,&Head,sizeof(struct _MZ_HEAD_));
-		if(Head.Magic != 0x00905a4d){
+		if(Head.Magic != 0x5a4d){
 			print("Unsuppose kernel image.\n");
 			stop();
 		}
@@ -343,11 +286,11 @@ void __attribute__((noreturn)) EntryPoint(const struct _RELY_MSG_ * Msg){
 		Size += pep.FileAlignment - 1;
 		Size &= ~(pep.FileAlignment - 1);
 		Seek(0,SEEK_SET,File);
-		Read(File,(void*)0x160000,Size);
+		Read(File,(void*)0x100000,Size);
 		Size = 0;
 		for(i = 0;i < pep.NumberOfSections;i++){
 			Seek(Section[i].PointerToRAWData,SEEK_SET,File);
-			Read(File,(void*)(0x160000 + Section[i].VirtualAddress),Section[i].SizeOfRawData);
+			Read(File,(void*)(0x100000 + Section[i].VirtualAddress),Section[i].SizeOfRawData);
 			if(Size < Section[i].SizeOfRawData + Section[i].VirtualAddress)
 				Size = Section[i].SizeOfRawData + Section[i].VirtualAddress;
 		}
@@ -356,20 +299,8 @@ void __attribute__((noreturn)) EntryPoint(const struct _RELY_MSG_ * Msg){
 		_Msg->KernelImageSize = Size;
 		Close(File);
 		vaddr = pep.ImageBase;
-		paddr = 0x160000;
-		MemoryStart = 0x160000 + Size;
-		while(Size >= 0x200000){
-			MemoryStart = put_page_2M(paddr,vaddr,MemoryStart);
-			paddr += 0x200000;
-			vaddr += 0x200000;
-			Size -= 0x200000;
-		}
-		while(Size){
-			MemoryStart = put_page_4K(paddr,vaddr,MemoryStart);
-			paddr += 0x1000;
-			vaddr += 0x1000;
-			Size  -= 0x1000;
-		}
+		paddr = 0x100000;
+		MemoryStart = 0x100000 + Size;
 		_Msg->FontBase = MemoryStart;
 	}
 	{//Load Font
@@ -418,6 +349,7 @@ void __attribute__((noreturn)) EntryPoint(const struct _RELY_MSG_ * Msg){
 	_Msg->MemoryStart += 0xfff;
 	_Msg->MemoryStart &= 0xfffffffffffff000;
 	KerEnt = pep.ImageBase + pep.AddressOfEntryPoint;
+	printk("%P.\n",KerEnt);
 	asm("movq %%cr3,%%rbx\n\tmovq %%rbx,%%cr3\n\tmovq $0xffff80000000fff8,%%rsp\n\tcall %%rax"::"a"(KerEnt),"c"(_Msg));;
 	Stop();
 }

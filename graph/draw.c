@@ -1,6 +1,21 @@
-//Lava OS
-//PageFault
-//20-04-10-00-16
+/*
+	graph/draw.c
+	Copyright (C) 2020  Quasimodo
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+*/
 
 #include <stddef.h>
 #include <asm.h>
@@ -230,7 +245,8 @@ void gui_init(){
 	width = cur_mode_info->xres;
 	byte_per_pixel = cur_mode_info->bits_per_pixel/8;
 	byte_per_scan_line = cur_mode_info->byte_per_scan_line;
-	lfb = mmio_map(cur_mode_info->lfb,info->mem_size * 65536);
+	lfb = ADDRP2V(cur_mode_info->lfb);
+	page_uncacheable(NULL,lfb,info->mem_size * 65536);
 	memset(lfb,0xff,high * byte_per_scan_line);
 	max_cpuid = init_msg.CPUCount - 1;
 	if(init_msg.CPUCount <= 1*1) a = 1;

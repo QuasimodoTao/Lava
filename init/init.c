@@ -35,10 +35,9 @@ struct _TASK_{
 
 void paging_init_ap();
 int paging_init_bp(u64 memory_start,u64 memory_size);
-void ker_stack_init();
 void sdt_init_bp();
+void irq_init();
 void sdt_init_ap();
-u64 mmio_init();
 
 void lapic_init();
 void apic_enable();
@@ -132,14 +131,12 @@ void  __attribute__((noreturn)) entry_point(struct _MSG_ * msg){//BSP start at h
 	
 	processor_count = 0;
 	memcpy(&init_msg,msg,sizeof(struct _MSG_));
-	paging_init_bp(msg->MemoryStart + msg->ATACount * AHCI_PORT_SPACE_SIZE,msg->MemorySize);
+	paging_init_bp(init_msg.MemoryStart + init_msg.ATACount * AHCI_PORT_SPACE_SIZE,init_msg.MemorySize);
 	bts((void*)PROCESS_INIT_MUTEX,0);
 	ker_heap_init();
 	sdt_init_bp();
 	private_data_init();
 	SD();
-	mmio_init();
-	ker_stack_init();
 	syscall_init();
 	fs_init();
 	mp_init();

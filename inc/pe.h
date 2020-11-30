@@ -23,7 +23,8 @@
 #include <stddef.h>
 
 struct _MZ_HEAD_ {
-	u32 Magic;
+	u16 Magic;
+	u16 res2;
 	u32 Res[14];
 	u32 PEHead;
 };

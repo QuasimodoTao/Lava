@@ -35,41 +35,40 @@
 #define gdt					((u64*)GDT_BASE)
 #define idt					((u64*)IDT_BASE)
 
-extern u8 __int_start[];//
-extern int __int_size;//
-extern int __int_enter;
-//extern int __int_kernel_ss_0;//
-//extern int __int_kernel_ss_1;//
+void switch_cs(u16);
 
-extern u8 __int_code_start[];//
-extern int __int_code_size;//
-extern int __int_code_enter;
-//extern int __int_code_kernel_ss_0;//
-//extern int __int_code_kernel_ss_1;//
-
-void int_ignore(struct _REG_STATUS_ * status);
-void divide_error(struct _REG_STATUS_ * status);
-void debug_exception(struct _REG_STATUS_ * stack);
-void NMI_int(struct _REG_STATUS_ * status);
-void break_point(struct _REG_STATUS_ * status);
-void overflow(struct _REG_STATUS_ * status);
-void bound_range_exceeded(struct _REG_STATUS_ * status);
-void invaild_opcode(struct _REG_STATUS_ * status);
-void no_math_coprocessor(struct _REG_STATUS_ * status);
-void double_fault(struct _REG_STATUS_ * status);
-void coprocessor_segment_overrun(struct _REG_STATUS_ * status);
-void invaild_TSS(struct _REG_STATUS_ * status);
-void segment_not_present(struct _REG_STATUS_ * status);
-void stack_segment_fault(struct _REG_STATUS_ * status);
-void general_protection(struct _REG_STATUS_ * status);
-void page_fault(struct _REG_STATUS_ * status);
-void FPU_error(struct _REG_STATUS_ * status);
-void alignment_check(struct _REG_STATUS_ * status);
-void machine_check(struct _REG_STATUS_ * status);
-void SIMD_FP_exception(struct _REG_STATUS_ * status);
-void virtualization_exception(struct _REG_STATUS_ * status);
-void switch_CS(u16);
-void irq_arise(int);
+void __int00(void);
+void __int01(void);
+void __int02(void);
+void __int03(void);
+void __int04(void);
+void __int05(void);
+void __int06(void);
+void __int07(void);
+void __int08(void);
+void __int09(void);
+void __int0a(void);
+void __int0b(void);
+void __int0c(void);
+void __int0d(void);
+void __int0e(void);
+void __int0f(void);
+void __int10(void);
+void __int11(void);
+void __int12(void);
+void __int13(void);
+void __int14(void);
+void __int15(void);
+void __int16(void);
+void __int17(void);
+void __int18(void);
+void __int19(void);
+void __int1a(void);
+void __int1b(void);
+void __int1c(void);
+void __int1d(void);
+void __int1e(void);
+void __int1f(void);
 
 static struct {
 	u16 limit;
@@ -124,23 +123,8 @@ void make_gate(int vector,u64 addr,int ist,int dpl,int type){
 
 }
 
-#define MakeInt(vector,dpl,ist,type,addr)	{\
-	make_gate(vector,INT_ENT_BASE + vector * int_ent_size,ist,dpl,type);\
-	memcpy((void*)(INT_ENT_BASE + vector * int_ent_size),__int_start,int_ent_size);\
-	*(void**)(INT_ENT_BASE + vector * int_ent_size + __int_enter) = addr;\
-}
-#define MakeCodeInt(vector,dpl,ist,type,addr)	{\
-	make_gate(vector,INT_ENT_BASE + vector * int_ent_size,ist,dpl,type);\
-	memcpy((void*)(INT_ENT_BASE + vector * int_ent_size),__int_code_start,int_ent_size);\
-	*(void**)(INT_ENT_BASE + vector * int_ent_size + __int_code_enter) = addr;\
-}
-
-void sdt_init_bp(){
+int sdt_init_bp(){
 	int i;
-	u64 * ent;
-	u8 * vector;
-	void * addr;
-	int int_ent_size;
 	u64 idteh,idtel;
 	
 	gdtr.limit = GDT_SIZE - 1;
@@ -158,41 +142,46 @@ void sdt_init_bp(){
 	gdt_first_free = (FIRST_SELECTOR >> 3) + 6;
 	lgdt(&gdtr);
 	sss(KERNEL_SS);
-	switch_CS(KERNEL_CS);
+	switch_cs(KERNEL_CS);
 	
 	idtr.limit = 4095;
 	idtr.base0 = (u64)idt & 0xffff;
 	idtr.base1 = ((u64)idt >> 16) & 0xffff;
 	idtr.base2 = ((u64)idt >> 32) & 0xffff;
 	idtr.base3 = ((u64)idt >> 48) & 0xffff;
-//	__int_start[__int_kernel_ss_0] = __int_start[__int_kernel_ss_1] = KERNEL_SS;
-//	__int_code_start[__int_code_kernel_ss_0] = __int_code_start[__int_code_kernel_ss_1] = KERNEL_SS;
-	int_ent_size = __int_size;
-	if(int_ent_size < __int_code_size) int_ent_size = __int_code_size;
-	int_ent_size = NATURALALIGNU(int_ent_size);
-	for(i = 0;i < int_ent_size * 21 + int_ent_size;i+= PAGE_SIZE) put_page(get_free_page(0,0),NULL,(void*)(INT_ENT_BASE + i));
-	int_ent_last_address = INT_ENT_BASE + int_ent_size * 21;
-	MakeInt(0,0,0,0x0e,divide_error);//divide_error
-	MakeInt(1,0,0,0x0e,debug_exception);//debug_exception
-	MakeInt(2,0,0,0x0f,NMI_int);//NMI_int
-	MakeInt(3,3,0,0x0e,break_point);//break_point
-	MakeInt(4,3,0,0x0f,overflow);//overflow
-	MakeInt(5,3,0,0x0e,bound_range_exceeded);//bound_range_exceeded
-	MakeInt(6,0,0,0x0e,invaild_opcode);//invaild_opcode
-	MakeInt(7,0,0,0x0f,no_math_coprocessor);//no_math_coprocessor
-	MakeCodeInt(8,0,0,0x0f,double_fault);//double_fault
-	MakeInt(9,0,0,0x0f,coprocessor_segment_overrun);//coprocessor_segment_overrun
-	MakeCodeInt(10,0,0,0x0f,invaild_TSS);//invaild_TSS
-	MakeCodeInt(11,0,0,0x0f,segment_not_present);//segment_not_present
-	MakeCodeInt(12,0,0,0x0f,stack_segment_fault);//stack_segment_fault
-	MakeCodeInt(13,0,0,0x0f,general_protection);//general_protection
-	MakeCodeInt(14,0,0,0x0f,page_fault);//page_fault
-	MakeInt(15,0,0,0x0f,int_ignore);//int_ignore
-	MakeCodeInt(16,0,0,0x0e,FPU_error);//FPU_error
-	MakeInt(17,0,0,0x0e,alignment_check);//alignment_check
-	MakeInt(18,0,0,0x0f,machine_check);//machine_check
-	MakeInt(19,0,0,0x0e,SIMD_FP_exception);//SIMD_FP_exception
-	MakeInt(20,0,0,0x0f,virtualization_exception);//virtualization_exception
+	make_gate(0,__int00,0,0,0x0e);
+	make_gate(1,__int01,0,0,0x0e);
+	make_gate(2,__int02,0,0,0x0f);
+	make_gate(3,__int03,0,3,0x0e);
+	make_gate(4,__int04,0,3,0x0f);
+	make_gate(5,__int05,0,3,0x0e);
+	make_gate(6,__int06,0,0,0x0e);
+	make_gate(7,__int07,0,0,0x0f);
+	make_gate(8,__int08,0,0,0x0f);
+	make_gate(9,__int09,0,0,0x0f);
+	make_gate(10,__int0a,0,0,0x0f);
+	make_gate(11,__int0b,0,0,0x0f);
+	make_gate(12,__int0c,0,0,0x0f);
+	make_gate(13,__int0d,0,0,0x0f);
+	make_gate(14,__int0e,0,0,0x0f);
+	make_gate(15,__int0f,0,0,0x0f);
+	make_gate(16,__int10,0,0,0x0e);
+	make_gate(17,__int11,0,0,0x0e);
+	make_gate(18,__int12,0,0,0x0f);
+	make_gate(19,__int13,0,0,0x0e);
+	make_gate(20,__int14,0,0,0x0f);
+	make_gate(21,__int15,0,0,0x0e);
+	make_gate(22,__int16,0,0,0x0e);
+	make_gate(23,__int17,0,0,0x0e);
+	make_gate(24,__int18,0,0,0x0e);
+	make_gate(25,__int19,0,0,0x0e);
+	make_gate(26,__int1a,0,0,0x0e);
+	make_gate(27,__int1b,0,0,0x0e);
+	make_gate(28,__int1c,0,0,0x0e);
+	make_gate(29,__int1d,0,0,0x0e);
+	make_gate(30,__int1e,0,0,0x0e);
+	make_gate(31,__int1f,0,0,0x0e);
+
 	
 	idtel = idt[30];
 	idteh = idt[31];
@@ -202,10 +191,11 @@ void sdt_init_bp(){
 	}
 	lidt(&idtr);
 	sti();
+	return 0;
 }
 void sdt_init_ap(){
 	lgdt(&gdtr);
 	lidt(&idtr);
 	sss(KERNEL_SS);
-	switch_CS(KERNEL_CS);
+	switch_cs(KERNEL_CS);
 }

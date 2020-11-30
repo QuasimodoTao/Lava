@@ -1,4 +1,4 @@
-ARCH = sdt.o int.o private.o syscall.o inte.o asm.o
+ARCH = sdt.o int.o private.o syscall.o ap_entry.o asm.o interrupt.o
 INC = ../inc/
 CC = gcc -c -Os $< -I $(INC) -fno-builtin -o $@
 SHELL = cmd.exe
@@ -10,10 +10,10 @@ all : arch.o
 arch.o : $(ARCH)
 	ld -r -o arch.o $(ARCH)
 
-inte.o : inte.asm
-	nasm -f bin -o inte.bin inte.asm
-	../tools/bin2c.exe inte.bin inte.c
-	gcc -c -Os inte.c -I $(INC) -fno-builtin -o $@
+ap_entry.o : ap_entry.asm
+	nasm -f bin -o ap_entry.bin ap_entry.asm
+	../tools/bin2c.exe ap_entry.bin ap_entry.c
+	gcc -c -Os ap_entry.c -I $(INC) -fno-builtin -o $@
 	
 switchcs.o : switchcs.s
 	$(CC)
@@ -36,5 +36,8 @@ syscall.o : syscall.c $(INC)stddef.h $(INC)arch.h $(INC)config.h $(INC)string.h 
 asm.o : asm.c $(INC)stddef.h $(INC)asm.h
 	$(CC)
 
+interrupt.o : interrupt.s
+	$(CC)
+
 clean :
-	-del arch.o $(ARCH) inte.c inte.bin
+	-del arch.o $(ARCH) ap_entry.c ap_entry.bin

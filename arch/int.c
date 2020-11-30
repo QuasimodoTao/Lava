@@ -34,7 +34,7 @@ void show_register(struct _REG_STATUS_ * stack){
 	printk("err:%016llX cs:%04X ss:%04X\n",stack->err_code,stack->cs,stack->ss);
 }
 
-void int_ignore(struct _REG_STATUS_ * stack){
+void int_ignore(struct _REG_STATUS_ * stack,u64 vector){
 	print("ignore int arise.\n");
 	show_register(stack);
 	stop();

@@ -385,7 +385,7 @@ void __attribute__((noreturn)) exit(int code){
 	timer_free(thread->timer);
 	free_area(thread,0x00007ff000000000,0x0000000fffffefff);
 	if(thread = xchgq(&killing_thread,thread)) {
-		free_stack(thread->stack);
+		kfree(thread->stack);
 		thread_list[thread->solt] = NULL;
 		kfree(thread);
 	}
@@ -410,7 +410,7 @@ static int raw_kill(LPTHREAD thread){
 		}
 	}
 	timer_free(thread->timer);
-	free_stack(thread->stack);
+	kfree(thread->stack);
 	thread_list[thread->solt] = NULL;
 	kfree(thread);
 }
@@ -1022,8 +1022,8 @@ LPPROCESS create_process(const wchar_t * name,void * argv){
 		//thread->busy = 0;//useless
 		thread->timer = timer_alloc(0,TMR_MOD_ONCE,NULL,NULL);
 		//thread->user_stack_p4e = 0;//useless
-		thread->stack = stack = alloc_stack(1);
-		stack = stack + KSS/sizeof(u64) - 12;
+		thread->stack = stack = kmalloc(4096,4096);
+		stack = stack + 4096/sizeof(u64) - 12;
 		thread->rsp = (u64)stack;
 		thread->ker_ent_rsp = thread->rsp + 88;
 		stack[0] = 0;//argument,rcx
@@ -1037,7 +1037,7 @@ LPPROCESS create_process(const wchar_t * name,void * argv){
 		stack[8] = 0;//r15
 		stack[9] = thread_entry;
 	}
-	put_page(system_enter_page,thread,SYSTEM_CALL_PROC_BASE);
+	put_page(system_enter_page,thread,0x00007ffffffff000);
 	put_page(get_free_page(1,1),thread,USER_INIT_RSP);
 	insert_process_thread(process,thread);
 	ID();
@@ -1063,8 +1063,8 @@ LPTHREAD create_thread(LPPROCESS process,int (*entry)(void*),void * argv){
 		//thread->status_disable = 0;
 		thread->timer = timer_alloc(0,TMR_MOD_ONCE,NULL,NULL);
 		//thread->user_stack_p4e = 0;//useless
-		thread->stack = stack = alloc_stack(1);
-		stack = stack + KSS/sizeof(u64) - 12;
+		thread->stack = stack = kmalloc(4096,4096);
+		stack = stack + 4096/sizeof(u64) - 12;
 		thread->rsp = (u64)stack;
 		thread->ker_ent_rsp = thread->rsp + 88;
 		stack[0] = entry;//argument,rcx
@@ -1082,7 +1082,7 @@ LPTHREAD create_thread(LPPROCESS process,int (*entry)(void*),void * argv){
 		//thread->level = 0;//useless
 		//thread->cur_level = 0;
 	}
-	put_page(system_enter_page,thread,SYSTEM_CALL_PROC_BASE);
+	put_page(system_enter_page,thread,0x00007ffffffff000);
 	put_page(get_free_page(1,1),thread,USER_INIT_RSP);
 	if(!process) process = GetCurProcess();
 	insert_process_thread(process,thread);
@@ -1143,8 +1143,8 @@ void __attribute__((noreturn)) schedule_init_ap(int (*entry)(void*),void * argv)
 		thread->id = xaddd(&thread_count,1);
 		//thread->level = 0;//useless
 		//thread->cur_level = 0;
-		thread->stack = stack = alloc_stack(1);
-		__rsp = stack = stack + KSS/sizeof(u64) - 8;
+		thread->stack = stack = kmalloc(4096,4096);
+		__rsp = stack = stack + 4096/sizeof(u64) - 8;
 		thread->ker_ent_rsp = __rsp + 56;
 		//thread->rsp = 0;
 		stack[0] = thread_entry;
@@ -1212,8 +1212,8 @@ void __attribute__((noreturn)) schedule_init(int (*entry)(void*),void * argv){
 		thread->flags = TF_ACTIVE;
 		thread->argv = argv;
 		thread->timer = timer_alloc(0,TMR_MOD_ONCE,NULL,NULL);
-		thread->stack = stack = alloc_stack(1);
-		__rsp = stack = stack + KSS/sizeof(u64) - 8;
+		thread->stack = stack = kmalloc(4096,4096);
+		__rsp = stack = stack + 4096/sizeof(u64) - 8;
 		thread->ker_ent_rsp = __rsp + 56;
 		//thread->id = 0;//useless
 		//thread->processor = GetCPUId();//useless

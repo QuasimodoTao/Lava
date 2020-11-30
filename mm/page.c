@@ -88,35 +88,44 @@ if(bit0 || bit61) address vaild
 else address unvaild
 */
 
-static u64 * syspdbe;
+static u64 syspdbe;
 static u64 page_count;
 static u64 cur_page;
-static int PAGE_EXIST_busy;
-
+static u64 free_page_base;
+#if (MAX_THREAD <= 255)
+static unsigned char * mem_map;
+#define MM_CMPXCHG(i,c,d,r)	cmpxchg1b(mem_map + i,c,d,r)
+#define MM_XADD(i,v)		xaddb(mem_map + i,v)		
+#elif (MAX_THREAD <= 65535)
+static unsigned short * mem_map;
+#define MM_CMPXCHG(i,c,d,r)	cmpxchg2b(mem_map + i,c,d,r)		
+#define MM_XADD(i,v)		xaddw(mem_map + i,v)		
+#else
+static unsigned int * mem_map;
+#define MM_CMPXCHG(i,c,d,r)	cmpxchg4b(mem_map + i,c,d,r)
+#define MM_XADD(i,v)		xaddd(mem_map + i,v)		
+#endif
 
 //获取空闲的页,将分配实际的物理页
-static PAGE __get_free_page(){
-	u64 i;
-	u64 mid;
-	u64 flags;
+static PAGE __get_free_page(){//lock-free
+	u64 i,mid,flags;
 	
 	flags = sflags();
 	cli();
-	spin_lock_bit(&PAGE_EXIST_busy,0);
-	i = cur_page;
-	mid = i;
-	for(i = cur_page;i < page_count;i++) if(!bts((void*)PGADMB,i)){
-		cur_page = i + 1;
-		PAGE_EXIST_busy = 0;
-		lflags(flags);
-		return i << 12;
-	}
-	for(i = 0;i < mid;i++) if(!bts((void*)PGADMB,i)){
-		cur_page = i + 1;
-		PAGE_EXIST_busy = 0;
-		lflags(flags);
-		return i << 12;
-	}
+	mid = i = cur_page;
+	for(i = cur_page;i < page_count;i++) 
+		if(!mem_map[i] && !MM_CMPXCHG(i,0,1,NULL)){
+			cmpxchg8b(&cur_page,mid,i + 1,NULL);
+			lflags(flags);
+			return (i << 12) + free_page_base;
+		}
+	for(i = 0;i < mid;i++) 
+		if(!mem_map[i] && !MM_CMPXCHG(i,0,1,NULL)){
+			cmpxchg8b(&cur_page,mid,i + 1,NULL);
+			lflags(flags);
+			return (i << 12) + free_page_base;
+		}
+	lflags(flags);
 	//TODO:swap out
 	print("No more page can be use.\n");
 	stop();
@@ -130,20 +139,17 @@ PAGEE get_free_page(int swapable,int leve){
 	}
 	else{
 		page = __get_free_page();
-		bts((void*)PGSDMB,page >> PAGE_SHIFT_1);
 		if(leve) return page | PAGE_WRITE | PAGE_USER | PAGE_EXIST;
 		else return page | PAGE_WRITE | PAGE_EXIST;
 	}
 }
 //释放页
-int free_page(PAGEE page){
+int free_page(PAGEE page){//lock-free
 	if(page & PAGE_EXIST) {
+		page -= free_page_base;
 		page >>= PAGE_SHIFT_1;
 		if(page >=  page_count) return -1;
-		spin_lock_bit(&PAGE_EXIST_busy,0);
-		btr((void*)PGADMB,page);
-		btr((void*)PGSDMB,page);
-		PAGE_EXIST_busy = 0;
+		MM_XADD(page,-1);
 		return 0;
 	}
 	else{
@@ -256,7 +262,12 @@ static int allocate_area_4K(LPTHREAD thread,VADDR vaddr,u32 count,int attr){
 	
 	if(!count) return 0;
 	p4e = P4E(vaddr);
-	if(p4e >= 256) p4 = syspdbe - 256;
+	if(p4e >= 256){
+		if(p4e > MAX_P4E){
+			//error
+		}
+		else p4 = (&syspdbe) - 256;
+	}
 	else {
 		if(!thread) thread = GetCurThread();
 		if(!thread) return -1;
@@ -348,7 +359,7 @@ static int allocate_area_4K(LPTHREAD thread,VADDR vaddr,u32 count,int attr){
 	}
 	//可以使用扩展页结构记录
 	p2e = P2E(vaddr);
-	if(!(p3[p3e] & PAGE_EXIST) && pg_ext_test_and_depress_new(p3+p3e,p2,user_mode)){
+	if(!(p3[p3e] & PAGE_EXIST) && pg_ext_test_and_depress_new(p3+p3e,p2e,user_mode)){
 		//对应地址已有效，返回错误
 		UnlockPDE(p3,p3e);
 		UnlockPDE(p4,p4e);
@@ -508,7 +519,12 @@ static int allocate_area_2M(LPTHREAD thread,VADDR vaddr,u32 count,int attr){
 	
 	if(!count) return 0;
 	p4e = P4E(vaddr);
-	if(p4e >= 256) p4 = syspdbe - 256;
+	if(p4e >= 256){
+		if(p4e > MAX_P4E){
+			//error
+		}
+		else p4 = (&syspdbe) - 256;
+	}
 	else {
 		if(!thread) thread = GetCurThread();
 		if(!thread) return -1;
@@ -743,7 +759,12 @@ static int allocate_area_1G(LPTHREAD thread,VADDR vaddr,u32 count,int attr){
 	
 	if(!count) return 0;
 	p4e = P4E(vaddr);
-	if(p4e >= 256) p4 = syspdbe - 256;
+	if(p4e >= 256){
+		if(p4e > MAX_P4E){
+			//error
+		}
+		else p4 = (&syspdbe) - 256;
+	}
 	else {
 		if(!thread) thread = GetCurThread();
 		if(!thread) return -1;
@@ -1030,7 +1051,12 @@ int allocate_area(LPTHREAD thread,VADDR vaddr,size_t size,int attr){
 	}
 	while(size >= PAGE_SIZE_512G){
 		p4e = P4E(vaddr);
-		if(p4e >= 256) p4 = syspdbe - 256;
+		if(p4e >= 256){
+			if(p4e > MAX_P4E){
+				//error
+			}
+			else p4 = (&syspdbe) - 256;
+		}
 		else {
 			if(!thread) thread = GetCurThread();
 			if(!thread) return -1;
@@ -1225,7 +1251,12 @@ static int free_area_4K(LPTHREAD thread,VADDR vaddr,u32 count){
 	
 	if(!count) return 0;
 	p4e = P4E(vaddr);
-	if(p4e >= 256) p4 = syspdbe - 256;
+	if(p4e >= 256){
+		if(p4e > MAX_P4E){
+			//error
+		}
+		else p4 = (&syspdbe) - 256;
+	}
 	else {
 		if(!thread) thread = GetCurThread();
 		if(!thread) return -1;
@@ -1567,7 +1598,12 @@ static int free_area_2M(LPTHREAD thread,VADDR vaddr,u32 count){
 	
 	if(!count) return 0;
 	p4e = P4E(vaddr);
-	if(p4e >= 256) p4 = syspdbe - 256;
+	if(p4e >= 256){
+		if(p4e > MAX_P4E){
+			//error
+		}
+		else p4 = (&syspdbe) - 256;
+	}
 	else {
 		if(!thread) thread = GetCurThread();
 		if(!thread) return -1;
@@ -1810,7 +1846,12 @@ static int free_area_1G(LPTHREAD thread,VADDR vaddr,u32 count){
 	
 	if(!count) return 0;
 	p4e = P4E(vaddr);
-	if(p4e >= 256) p4 = syspdbe - 256;
+	if(p4e >= 256){
+		if(p4e > MAX_P4E){
+			//error
+		}
+		else p4 = (&syspdbe) - 256;
+	}
 	else {
 		if(!thread) thread = GetCurThread();
 		if(!thread) return -1;
@@ -2006,7 +2047,12 @@ int free_area(LPTHREAD thread,VADDR vaddr,size_t size){
 	}
 	while(size >= PAGE_SIZE_512G){
 		p4e = P4E(vaddr);
-		if(p4e >= 256) p4 = syspdbe - 256;
+		if(p4e >= 256){
+			if(p4e > MAX_P4E){
+				//error
+			}
+			else p4 = (&syspdbe) - 256;
+		}
 		else {
 			if(!thread) thread = GetCurThread();
 			if(!thread) return -1;
@@ -2083,7 +2129,12 @@ int free_vaddr(LPTHREAD thread,VADDR vaddr){
 	u8 t_bit_map[(PAGE_ENT_MASK + 1)/8];
 	
 	p4e = P4E(vaddr);
-	if(p4e >= 256) p4 = syspdbe - 256;
+	if(p4e >= 256){
+		if(p4e > MAX_P4E){
+			//error
+		}
+		else p4 = (&syspdbe) - 256;
+	}
 	else {
 		if(!thread) thread = GetCurThread();
 		if(!thread) return -1;
@@ -2438,7 +2489,12 @@ int addr_vaild(LPTHREAD thread,VADDR addr){
 	LPPROCESS process = NULL;
 	
 	p4e = P4E(addr);
-	if(p4e >= 256) p4 = syspdbe - 256;
+	if(p4e >= 256){
+		if(p4e > MAX_P4E){
+			//error
+		}
+		else p4 = (&syspdbe) - 256;
+	}
 	else {
 		if(!thread) thread = GetCurThread();
 		if(!thread) return -1;
@@ -2519,7 +2575,12 @@ PADDR ADDRV2P(LPTHREAD thread,VADDR addr){
 	PADDR paddr;
 	
 	p4e = P4E(addr);
-	if(p4e >= 256) p4 = syspdbe - 256;
+	if(p4e >= 256){
+		if(p4e > MAX_P4E){
+			//error
+		}
+		else p4 = (&syspdbe) - 256;
+	}
 	else {
 		if(!thread) thread = GetCurThread();
 		if(!thread) return -1;
@@ -2584,7 +2645,13 @@ int put_page(PAGEE page, LPTHREAD thread, VADDR addr){
 	u64 user_mode = 0;
 	
 	p4e = P4E(addr);
-	if(p4e >= 256) p4 = syspdbe - 256;
+	if(p4e >= 256){
+		if(p4e > MAX_P4E){
+			printk("Try mapping page at unsupport address %P.\n",addr);
+			stop();
+		}
+		else p4 = (&syspdbe) - 256;
+	}
 	else {
 		if(!thread) thread = GetCurThread();
 		if(!thread) return -1;
@@ -2791,7 +2858,12 @@ PAGEE get_page(LPTHREAD thread,VADDR addr){
 	PAGEE page;
 	
 	p4e = P4E(addr);
-	if(p4e >= 256) p4 = syspdbe - 256;
+	if(p4e >= 256){
+		if(p4e > MAX_P4E){
+			//error
+		}
+		else p4 = (&syspdbe) - 256;
+	}
 	else {
 		if(!thread) thread = GetCurThread();
 		if(!thread) return -1;
@@ -2874,7 +2946,12 @@ int page_unswapable(LPTHREAD thread,VADDR vaddr,size_t size){
 	while(start < end){
 		user_mode = 0;
 		p4e = P4E(start);
-		if(p4e >= 256) p4 = syspdbe - 256;
+		if(p4e >= 256){
+			if(p4e > MAX_P4E){
+				//error
+			}
+			else p4 = (&syspdbe) - 256;
+		}
 		else{
 			user_mode = PAGE_USER;
 			if(p4e == USER_STACK_P4E_INDEX) p4 = (&(thread->user_stack_p4e)) - USER_STACK_P4E_INDEX;
@@ -2921,7 +2998,6 @@ int page_unswapable(LPTHREAD thread,VADDR vaddr,size_t size){
 		UnlockPDE(p2,p2e);
 		if(p1[p1e] & PAGE_EXIST){
 			p1[p1e] |= PAGE_PWT | PAGE_PCD;
-			bts((void*)PGSDMB,(p1[p1e] & PAGE_PADDR_MASK) >> PAGE_SHIFT_1);
 			UnlockPDE(p1,p1e);
 			IE();
 			start = (VADDR)((u64)start + PAGE_SIZE_4K);
@@ -2979,7 +3055,12 @@ int page_swapable(LPTHREAD thread,VADDR vaddr,size_t size){
 	while(start < end){
 		user_mode = 0;
 		p4e = P4E(start);
-		if(p4e >= 256) p4 = syspdbe - 256;
+		if(p4e >= 256){
+			if(p4e > MAX_P4E){
+				//error
+			}
+			else p4 = (&syspdbe) - 256;
+		}
 		else{
 			user_mode = PAGE_USER;
 			if(p4e == USER_STACK_P4E_INDEX) p4 = (&(thread->user_stack_p4e)) - USER_STACK_P4E_INDEX;
@@ -3011,7 +3092,6 @@ int page_swapable(LPTHREAD thread,VADDR vaddr,size_t size){
 		UnlockPDE(p2,p2e);
 		if(p1[p1e] & PAGE_EXIST){
 			p1[p1e] |= PAGE_PWT | PAGE_PCD;
-			btr((void*)PGSDMB,(p1[p1e] & PAGE_PADDR_MASK) >> PAGE_SHIFT_1);
 			UnlockPDE(p1,p1e);
 			IE();
 			start = (VADDR)((u64)start + PAGE_SIZE_4K);
@@ -3028,17 +3108,19 @@ int page_swapable(LPTHREAD thread,VADDR vaddr,size_t size){
 //释放页
 int page_allocatable(u64 page){
 	if(!page) return -1;
+	page -= free_page_base;
 	page >>= 12;
 	if(page >= page_count) return -1;
-	btr((void*)PGADMB,page);
+	mem_map[page] = 0;
 	return 0;
 }
 //强制占用页
 int page_disallocatable(u64 page){
 	if(!page) return -1;
+	page -= free_page_base;
 	page >>= 12;
 	if(page >= page_count) return -1;
-	bts((void*)PGADMB,page);
+	mem_map[page] = 1;
 	return 0;
 }
 //设置页为不可缓冲，页必须存在
@@ -3057,7 +3139,12 @@ int page_uncacheable(LPTHREAD thread,VADDR vaddr,size_t size){
 	while(start < end){
 		p4e = P4E(start);
 		user_mode = 0;
-		if(p4e >= 256) p4 = syspdbe - 256;
+		if(p4e >= 256){
+			if(p4e > MAX_P4E){
+				//error
+			}
+			else p4 = (&syspdbe) - 256;
+		}
 		else {
 			user_mode = 1;
 			if(!thread) thread = GetCurThread();
@@ -3110,8 +3197,6 @@ int page_uncacheable(LPTHREAD thread,VADDR vaddr,size_t size){
 		UnlockPDE(p2,p2e);
 		if(p1[p1e] & PAGE_EXIST){
 			p1[p1e] |= PAGE_PWT | PAGE_PCD;
-			if(((p1[p1e] & PAGE_PADDR_MASK) >> PAGE_SHIFT_1) < page_count)
-				bts((void*)PGSDMB,(p1[p1e] & PAGE_PADDR_MASK) >> PAGE_SHIFT_1);
 			UnlockPDE(p1,p1e);
 			IE();
 			start = (VADDR)((u64)start + PAGE_SIZE_4K);
@@ -3163,7 +3248,12 @@ int page_cacheable(LPTHREAD thread,VADDR vaddr,size_t size){
 	if(!process) process = thread->father;
 	while(start < end){
 		p4e = P4E(start);
-		if(p4e >= 256) p4 = syspdbe - 256;
+		if(p4e >= 256){
+			if(p4e > MAX_P4E){
+				//error
+			}
+			else p4 = (&syspdbe) - 256;
+		}
 		else{
 			user_mode = PAGE_USER;
 			if(p4e == USER_STACK_P4E_INDEX) p4 = (&(thread->user_stack_p4e)) - USER_STACK_P4E_INDEX;
@@ -3232,15 +3322,15 @@ u64 create_paging(){
 	
 	pdb = __get_free_page();
 	p4 = PADDR2V(pdb);
-	memset(p4,0,2048);
-	memcpy(p4 + 256,syspdbe,256 * 8);
+	memset(p4,0,PAGE_SIZE);
+	p4[256] = syspdbe;
 	return pdb;
 }
 void paging_init_ap(){
 	u64 * p4;
 	
 	p4 = (u64*)(get_cr3() & PAGE_PADDR_MASK);
-	memcpy(p4 + 256,syspdbe,2048);
+	p4[256] = syspdbe;
 	set_cr3(get_cr3());
 }
 static void paging_panic(struct _REG_STATUS_ * reg,u64 addr){
@@ -3285,14 +3375,19 @@ bit4:I/D:	0:not instruction
 	//if(addr == 0x7fffffffeff0) stop();
 	if(!(reg->err_code & 0x01)){
 		p4e = P4E(addr);
-		if(p4e >= 256) p4 = syspdbe - 256;
+		if(p4e >= 256){
+			if(p4e > MAX_P4E){
+				//error
+			}
+			else p4 = (&syspdbe) - 256;
+		}
 		else {
 			thread = GetCurThread();
 			user_mode = PAGE_USER;
 			if(p4e == USER_STACK_P4E_INDEX) p4 = (&(thread->user_stack_p4e)) - USER_STACK_P4E_INDEX;
 			else{
 				process = thread->father;
-				if(!process) paging_panic(reg,addr);
+				if(!process) paging_panic(reg,(u64)addr);
 				p4 = process->pdbe;
 			}
 			
@@ -3309,7 +3404,7 @@ bit4:I/D:	0:not instruction
 		ID();
 		LockPDE(p4,p4e);
 		p3e = P3E(addr);
-		if(!(p4[p4e] & PAGE_EXIST) && pg_ext_test_and_depress(p4+p4e,p3,user_mode)){
+		if(!(p4[p4e] & PAGE_EXIST) && pg_ext_test_and_depress(p4+p4e,p3e,user_mode)){
 			UnlockPDE(p4,p4e);
 			IE();
 			paging_panic(reg,addr);
@@ -3319,7 +3414,7 @@ bit4:I/D:	0:not instruction
 		LockPDE(p3,p3e);
 		UnlockPDE(p4,p4e);
 		p2e = P2E(addr);
-		if(!(p3[p3e] & PAGE_EXIST) && pg_ext_test_and_depress(p3+p3e,p2,user_mode)){
+		if(!(p3[p3e] & PAGE_EXIST) && pg_ext_test_and_depress(p3+p3e,p2e,user_mode)){
 			UnlockPDE(p3,p3e);
 			IE();
 			paging_panic(reg,addr);
@@ -3329,7 +3424,7 @@ bit4:I/D:	0:not instruction
 		LockPDE(p2,p2e);
 		UnlockPDE(p3,p3e);
 		p1e = P1E(addr);
-		if(!(p2[p2e] & PAGE_EXIST) && pg_ext_test_and_depress(p2+p2e,p1,user_mode)){
+		if(!(p2[p2e] & PAGE_EXIST) && pg_ext_test_and_depress(p2+p2e,p1e,user_mode)){
 			UnlockPDE(p2,p2e);
 			IE();
 			paging_panic(reg,addr);
@@ -3371,91 +3466,53 @@ bit4:I/D:	0:not instruction
 }
 int INIT paging_init_bp(u64 memory_start,u64 memory_size){
 	u64 * p4,* p3,* p2,* p1;
-	u32 p4e,p3e,p2e,p1e;
+	u32 p3e,p2e,p1e;
 	u32 i,j,mask_size;
 	int _cpuid[4];
 	u64 addr;
+	u64 r_size;
 	
+	r_size = memory_size;
+	if(memory_size < 4LL * 1024 * 1024 * 1024) memory_size = 4LL * 1024 * 1024 * 1024;
 	memory_start += PAGE_SIZE - 1;
-	memory_start &= PAGE_PADDR_MASK;
-	p4 = (VADDR)(get_cr3() & PAGE_PADDR_MASK);
-	memcpy((VADDR)(memory_start),p4,PAGE_SIZE);
+	memory_start &= ~(PAGE_SIZE - 1);
 	p4 = (VADDR)memory_start;
-	syspdbe = ADDRP2V((PADDR)(p4 + 256));
+	memset(p4,0,PAGE_SIZE);
 	memory_start += PAGE_SIZE;
-	page_count = memory_size >> 12;
 	cpuid(0x80000001,0,_cpuid);
-	p4e = (memory_size + (1LL << PAGE_SHIFT_4) - 1) >> PAGE_SHIFT_4;
+	if(memory_size > 256LL * 1024 * 1024 * 1024) memory_size = 256LL * 1024 * 1024 * 1024;
 	p3e = (memory_size + (1LL << PAGE_SHIFT_3) - 1) >> PAGE_SHIFT_3;
 	p2e = (memory_size + (1LL << PAGE_SHIFT_2) - 1) >> PAGE_SHIFT_2;
-	{//map up to 64TB physiacl memory space at 0xffff800000000000
+	{//map up to 256GB physiacl memory space at 0xffff800000000000
 		p3 = (VADDR)memory_start;
-		for(i = 0;i < p4e;i++) p4[256 + i] = memory_start + i * PAGE_SIZE | PAGE_WRITE | PAGE_EXIST;
-		memory_start += p4e * PAGE_SIZE;
+		syspdbe = p4[256] = memory_start | PAGE_WRITE | PAGE_EXIST;
+		memory_start += PAGE_SIZE;
 		if(_cpuid[3] & 0x04000000){
 			//Suppose 1G page
 			for(i = 0;i < p3e;i++) p3[i] = i * PAGE_SIZE_1G | PAGE_BIG | PAGE_WRITE | PAGE_EXIST; 
-			for(;i < p4e * 512;i++) p3[i] = 0;
+			for(;i < 512;i++) p3[i] = 0;
 		}
 		else {
 			//Unsuppose 1G page
 			p2 = (VADDR)memory_start;
 			for(i = 0;i < p3e;i++) p3[i] = memory_start + i * PAGE_SIZE | PAGE_WRITE | PAGE_EXIST;
-			for(;i < p4e * 512;i++) p3[i] = 0;
+			for(;i < 512;i++) p3[i] = 0;
 			memory_start += p3e * PAGE_SIZE;
 			for(i = 0;i < p2e;i++) p2[i] = i * PAGE_SIZE_2M | PAGE_BIG | PAGE_WRITE | PAGE_EXIST; 
 			for(;i < p3e * 512;i++) p2[i] = 0;
 		}
 	}
-	mask_size = (page_count + 0x07) >> 3;
-	mask_size += PAGE_SIZE - 1;
-	mask_size &= PAGE_PADDR_MASK;
-	addr = PGADMB;
-	for(j = 0;j < 2;j++){
-		for(i = 0;i < mask_size;i += PAGE_SIZE){
-			p4e = P4E(addr + i);
-			if(p4[p4e] & PAGE_EXIST) p3 = (VADDR)(p4[p4e] & PAGE_PADDR_MASK);
-			else{
-				p3 = (VADDR)memory_start;
-				p4[p4e] = memory_start | PAGE_WRITE | PAGE_EXIST;
-				memory_start += PAGE_SIZE;
-				memset(p3,0,PAGE_SIZE);
-			}
-			p3e = P3E(addr + i);
-			if(p3[p3e] & PAGE_EXIST) p2 = (VADDR)(p3[p3e] & PAGE_PADDR_MASK);
-			else{
-				p2 = (VADDR)memory_start;
-				p3[p3e] = memory_start | PAGE_WRITE | PAGE_EXIST;
-				memory_start += PAGE_SIZE;
-				memset(p2,0,PAGE_SIZE);
-			}
-			p2e = P2E(addr + i);
-			if(p2[p2e] & PAGE_EXIST) p1 = (VADDR)(p2[p2e] & PAGE_PADDR_MASK);
-			else{
-				p1 = (VADDR)memory_start;
-				p2[p2e] = memory_start | PAGE_WRITE | PAGE_EXIST;
-				memory_start += PAGE_SIZE;
-				memset(p1,0,PAGE_SIZE);
-			}
-			p1e = P1E(addr + i);
-			if(!(p1[p1e] & PAGE_EXIST)){
-				p1[p1e] = memory_start | PAGE_WRITE | PAGE_EXIST;
-				memset((VADDR)memory_start,0,PAGE_SIZE);
-				memory_start += PAGE_SIZE;
-			}
-		}
-		addr = PGSDMB;
-	}
-	memory_start >>= 12;
-	put_cr3(p4);
-	memset(PGADMB,0xff,memory_start >> 3);
-	memset(PGSDMB,0xff,memory_start >> 3);
-	for(i = 0;i < (memory_start & 0x07);i++) bts((void*)(((u64)PGADMB) + (memory_start >> 3)),i);
-	for(i = 0;i < (memory_start & 0x07);i++) bts((void*)(((u64)PGSDMB) + (memory_start >> 3)),i);
-	cur_page = memory_start;
-	PAGE_EXIST_busy = 0;
-	put_page(0x1003,NULL,AP_INIT_BASE);
-	*((u64**)SYSPDBE_PTR) = syspdbe;
+	mem_map = ADDRP2V(memory_start);
+	memory_size = r_size;
+	page_count = (memory_size - memory_start)/(4096 + sizeof(mem_map[0]));
+	page_count--;
+	memset(mem_map,0,page_count * sizeof(mem_map[0]));
+	memory_start += page_count * sizeof(mem_map[0]);
+	memory_start += PAGE_SIZE - 1;
+	memory_start &= ~(PAGE_SIZE - 1);
+	free_page_base = memory_start;
+	cur_page = 0;
+	set_cr3(p4);
 	return 0;
 }
 

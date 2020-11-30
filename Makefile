@@ -10,8 +10,8 @@ debug : all
 
 all : tools Lava.vhd _boot _lib _ker _lm lm.exe lava.exe
 
-lava.exe : $(KER) 
-	ld --image-base 0xffffc07fc0000000 -e entry_point -o lava.exe $(KER)
+lava.exe : $(KER) Makefile
+	ld --image-base 0xffff800000100000 -e entry_point -o lava.exe $(KER)
 	dop -O Lava.vhd -f 1 lava.exe lava.sys
 
 tools :

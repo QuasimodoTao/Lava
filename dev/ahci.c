@@ -100,7 +100,6 @@ static int ahci_int_handle(struct _PCIDEV_ * dev,struct _AHCI_ * ahci,u16 pci_st
 
 struct _AHCI_ * ahci_open(LPPCIDEV dev){
 	int port_count;
-	u32 bar;
 	volatile struct _HBA_ * hba;
 	struct _AHCI_ * ahci;
 	int i;
@@ -109,8 +108,8 @@ struct _AHCI_ * ahci_open(LPPCIDEV dev){
 	for(ahci = ahci_list;ahci && ahci->dev != dev;ahci = ahci->next);
 	if(!ahci){
 		spin_unlock_bit(&busy,0);
-		bar = pci_read_dword(dev,PCI0BAR(5));
-		hba = mmio_map(bar,0x1100);
+		hba = ADDRP2V(pci_read_dword(dev,PCI0BAR(5)));
+		page_uncacheable(NULL,hba,0x1100);
 		port_count = (hba->cap & HBA_CAP_NP) + 1;
 		ahci = kmalloc(sizeof(struct _AHCI_) + sizeof(void*) * port_count,0);
 		spin_lock_bit(&busy,0);
