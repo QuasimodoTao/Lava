@@ -376,8 +376,8 @@ struct _REG_STATUS_ {
 #define RSPL(x)		((x)*2+1)
 #define RSPH(x)		((x)*2+2)
 
-#define ISTL(x)		((x)*2+9)
-#define ISTH(x)		((x)*2+10)
+#define ISTL(x)		((x)*2+7)
+#define ISTH(x)		((x)*2+8)
 
 struct _TSS_64_ {
 	u32 reg[25];

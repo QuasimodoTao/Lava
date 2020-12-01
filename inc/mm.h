@@ -28,7 +28,7 @@ typedef void * VADDR;
 //PAGE:不包含属性位，值包含物理页地址或也较好慌21特
 //PAGEE:包含属性位和物理页地址
 
-PAGEE get_free_page(int swapable,int leve);
+PAGEE get_free_page(int swapable,int leve,int bits);
 int free_page(PAGEE page);
 int addr_vaild(LPTHREAD thread,VADDR vaddr);
 PADDR ADDRV2P(LPTHREAD thread,VADDR vaddr);
@@ -43,17 +43,22 @@ int page_cacheable(LPTHREAD thread,VADDR vaddr,size_t size);
 int free_vaddr(LPTHREAD thread,VADDR vaddr);
 VADDR kmalloc(size_t size,unsigned int align);
 void kfree(VADDR addr);
-
 void * vmalloc(size_t size);
 void vfree(VADDR addr);
 u64 ker_heap_clean();
-
-void * alloc_stack();
-void free_stack(VADDR _stack);
-
 u64 create_paging();
+int allocate_area(LPTHREAD thread,VADDR vaddr,size_t size,int attr);
+int free_area(LPTHREAD thread,VADDR vaddr,size_t size);
+int free_page_table(LPPROCESS process);
 
-void * mmio_map(u64 paddr,size_t size);
+#ifdef SPEARATE_STACK
+void * alloc_stack();
+void free_stack(void*);
+#else
+#define alloc_stack()       kmalloc(STACK_SIZE,PAGE_SIZE)
+#define free_stack(stack)   kfree(stack)
+#endif
+
 
 #define PAGE2PAGEE(page,p,w,u)	((page) | (p?0:1) | ((w?0:1) << 1) | ((u?0:1) << 2))
 #define PAGEE2PAGE(page)		((page) & PAGE_PADDR_MASK_4K)

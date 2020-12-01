@@ -27,12 +27,11 @@
 #include <arch.h>
 #include <timer.h>
 #include <spinlock.h>
+#include <int.h>
 
 #define TF_ACTIVE	0//
 #define TF_BLOCK	1//block by something
-#define TF_CREAT	2//creating
-#define TF_DESTORY	3//destorying
-#define TF_STOP		4//only control struct exist
+#define TF_DESTORY	2//destorying
 
 typedef struct _USER_ {
 	u32 id;
@@ -62,7 +61,6 @@ typedef struct _PROCESS_ {
 	struct _PROCESS_ * prev;
 	struct _PROCESS_ * next;
 	struct _STREAM_ * file;
-	struct _UNLEAK_LOG_ * unleak_memory_list;
 	const wchar_t * image_name;
 	const wchar_t * short_name;
 	FS_PATH cur_path;
@@ -70,15 +68,14 @@ typedef struct _PROCESS_ {
 typedef struct _THREAD_ {
 	volatile int gst;
 	u32 id;
-	int busy;
-	volatile u32 flags;
-	volatile u32 status_disable;
-	int processor;//hold current processor which my control,-1 is unrunning thread
+	u8 busy;
+	u8 flag;
+	u8 processor;//hold current processor which my control
+	u8 priority;
+	u8 need_destory;
 	int cpu_time;
-	int priority;
 	volatile int semaphore_val;
 	int solt;
-	struct _TIMER_ * timer;
 	u64 user_stack_p4e;
 	u64 ker_ent_rsp;
 	u64 rsp;
@@ -93,7 +90,6 @@ int processor_count;
 u64 kernel_time;
 int global_flags;
 LPUSER current_user;
-u64 system_enter_page;
 
 void __attribute__((noreturn)) exit(int code);
 int kill(LPTHREAD thread);
@@ -104,11 +100,14 @@ LPTHREAD create_thread(LPPROCESS process,int (*entry)(void*),void*);
 
 void schedule2();
 static inline void schedule_disable(){
+	ID();
 	lock_bts_private(flags,CPU_FLAGS_SCHEDULE_DISABLE);
 	write_private_dword(schedule_disable_count,read_private_dword(schedule_disable_count) + 1);
+	IE();
 }
 static inline void schedule_enable(){
 	u32 val;
+	ID();
 	val = read_private_dword(schedule_disable_count);
 	if(val){
 		val--;
@@ -118,6 +117,7 @@ static inline void schedule_enable(){
 		lock_btr_private(flags,CPU_FLAGS_SCHEDULE_DISABLE);
 		if(lock_btr_private(flags,CPU_FLAGS_NEED_SCHEDULE)) schedule2();
 	}
+	IE();
 }
 
 #define SD()	schedule_disable()
@@ -130,9 +130,7 @@ static inline void schedule_enable(){
 
 #define THREAD_STATUS_BUSY_BIT	0//thread can not be kill when this bit is set
 #define THREAD_PLIST_BUSY_BIT	1//thread can not remove from father's list when set
-#define THREAD_KILL_WHEN_WAKE_BIT	3//thread will be kill if this bit is set
 #define THREAD_STATUS_BUSY		(1 << THREAD_STATUS_BUSY_BIT)
-#define THREAD_KILL_WHEN_WAKE	(1 << THREAD_KILL_WHEN_WAKE_BIT)
 spin_optr_struct_member_bit(ThreadStatus,struct _THREAD_,busy,THREAD_STATUS_BUSY_BIT);
 spin_optr_struct_member_bit(ThreadPList,struct _THREAD_,busy,THREAD_PLIST_BUSY_BIT);
 

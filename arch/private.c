@@ -29,7 +29,7 @@ void private_data_init(){
 	struct _PRIVATE_DATA_ * private_data;
 	u16 selector;
 	
-	page = get_free_page(0,0);
+	page = get_free_page(0,0,0);
 	memset(PADDR2V(page),0,0x1000);
 	private_data = PADDR2V(page);
 	private_data->cpu_id = processor_count;
@@ -39,5 +39,7 @@ void private_data_init(){
 	private_data->TSS.IO_map_base = offsetof(struct _TSS_64_,IO_map);
 	private_data->TSS.IO_map[0] = private_data->TSS.IO_map[1] = 0xffffffff;
 	selector = put_TSS(&(private_data->TSS));
+	private_data->int_disable_count = 1;
+	private_data->schedule_disable_count = 1;
 	ltr(selector);
 }

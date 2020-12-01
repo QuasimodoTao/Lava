@@ -122,7 +122,6 @@ void make_gate(int vector,u64 addr,int ist,int dpl,int type){
 	idt[vector * 2 + 1] = (addr >> 32) & 0x00000000ffffffff;
 
 }
-
 int sdt_init_bp(){
 	int i;
 	u64 idteh,idtel;
@@ -157,7 +156,7 @@ int sdt_init_bp(){
 	make_gate(5,__int05,0,3,0x0e);
 	make_gate(6,__int06,0,0,0x0e);
 	make_gate(7,__int07,0,0,0x0f);
-	make_gate(8,__int08,0,0,0x0f);
+	make_gate(8,__int08,1,0,0x0f);
 	make_gate(9,__int09,0,0,0x0f);
 	make_gate(10,__int0a,0,0,0x0f);
 	make_gate(11,__int0b,0,0,0x0f);
@@ -181,7 +180,6 @@ int sdt_init_bp(){
 	make_gate(29,__int1d,0,0,0x0e);
 	make_gate(30,__int1e,0,0,0x0e);
 	make_gate(31,__int1f,0,0,0x0e);
-
 	
 	idtel = idt[30];
 	idteh = idt[31];
@@ -190,7 +188,6 @@ int sdt_init_bp(){
 		idt[i * 2 + 1] = idteh;
 	}
 	lidt(&idtr);
-	sti();
 	return 0;
 }
 void sdt_init_ap(){

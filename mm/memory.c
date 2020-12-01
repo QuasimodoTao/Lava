@@ -104,6 +104,117 @@ spin_optr_def_bit(List,&lock,HEAP_LIST_BUSY);
 spin_optr_def_bit(Empty,&lock,HEAP_EMPTY_BUSY);
 spin_optr_def_arg_bit(First,&first_lock,0);
 
+#ifdef SPEARATE_STACK
+static u64 * stack_map[MAX_THREAD / (PAGE_SIZE * 8)] = {NULL,};
+static volatile u64 * stack_vaild[MAX_THREAD / (PAGE_SIZE * 8)] = {NULL,};
+#if(MAX_THREAD / (PAGE_SIZE * 8) <= 64)
+static u64 map_updata = 0;
+#define MAP_UPDATE_TRYLOCK(i)		spin_try_lock_bit(&map_updata,(i))
+#define MAP_UPDATE_UNLOCK(i)		spin_unlock_bit(&map_updata,(i))
+#define MAP_UPDATE_TEST(i)			(map_updata & (1LL << (i)))
+#else
+static u64 map_updata[MAX_THREAD / (PAGE_SIZE * 8)/ (sizeof(u64) * 8)] = {0,};
+#define MAP_UPDATE_TRYLOCK(i)		spin_try_lock_bit(map_updata,(i))
+#define MAP_UPDATE_UNLOCK(i)		spin_unlock_bit(map_updata,(i))
+#define MAP_UPDATE_TEST(i)			(map_updata[(i) / sizeof(u64)] & (1LL << ((i) & ~(sizeof(u64) - 1))))
+
+#endif
+
+void * alloc_stack(){
+	int i,j,k;
+	u64 mask;
+	PAGEE page;
+	u64 stack;
+
+	for(i = 0;i < MAX_THREAD / (PAGE_SIZE * 8);i++){
+		if(!stack_map[i]){
+			if(MAP_UPDATE_TRYLOCK(i)){
+				mask = 1 << i;
+				while(MAP_UPDATE_TEST(i)) pause();
+			}
+			else{
+				stack_map[i] = PADDR2V(get_free_page(0,0,0));
+				stack_vaild[i] = PADDR2V(get_free_page(0,0,0));
+				memset(stack_map[i],0,PAGE_SIZE);
+				memset(stack_vaild[i],0,PAGE_SIZE);
+				MAP_UPDATE_UNLOCK(i);
+			}
+		}
+		for(j = 0;j < PAGE_SIZE /sizeof(u64);j++){
+			if(~stack_map[i][j]) {
+				mask = 1;
+				for(k = 0;k < sizeof(u64) * 8;k++){
+					if(!(stack_map[i][j] & mask) && !spin_try_lock_bit(&stack_map[i][j],k)){
+						stack = STACK_BASE + STACK_SIZE * (i * PAGE_SIZE * 8 + j * sizeof(u64) * 8 + k);
+						if(stack_vaild[i][j] & mask){
+							return (VADDR)stack;
+						}
+						stack += STACK_SIZE - PAGE_SIZE;
+						for(i = STACK_SIZE/PAGE_SIZE - 1;i;i--){
+							page = get_free_page(0,0,0);
+							put_page(page,NULL,(VADDR)stack);
+							stack -= PAGE_SIZE;
+						}
+						stack_vaild[i][j] |= mask;
+						return (VADDR)stack;
+					}
+					if(!~stack_map[i][j]) break;
+					mask <<= 1;
+				}
+			}
+		}
+	}
+	return NULL;
+}
+void free_stack(void* stack){
+	int i,j;
+	u64 _stack;
+
+	_stack = (u64)stack;
+	_stack -= STACK_BASE;
+	_stack /= STACK_SIZE;
+	j = _stack & (PAGE_SIZE * 8 - 1);
+	_stack /= PAGE_SIZE * 8;
+	i = _stack;
+	if(!stack_map[i]) {
+		//error
+		printk("free not exits stack:%P,%d,%d.\n",stack,i,j);
+		stop();
+	}
+	spin_unlock_bit(stack_map[i],j);
+}
+u64 clean_stack(){
+	int i,j,k;
+	u64 mask;
+	u64 stack;
+	u64 free_count = 0;
+
+	for(i = 0;i < MAX_THREAD / (PAGE_SIZE * 8);i++){
+		if(MAP_UPDATE_TEST(i)) continue;
+		if(!stack_map[i]) continue;
+		for(j = 0;j < PAGE_SIZE/sizeof(u64);j++){
+			if(~stack_map[i][j]){
+				mask = 1;
+				for(k = 0;k < sizeof(u64) * 8;k++){
+					if(stack_vaild[i][j] & mask && !spin_try_lock_bit(&stack_map[i][j],k)){
+						if(stack_vaild[i][j] & mask){
+							stack = STACK_BASE + STACK_SIZE * (i * PAGE_SIZE * 8 + j * sizeof(u64) * 8 + k);
+							free_area(NULL,(VADDR)(stack + PAGE_SIZE),STACK_SIZE - PAGE_SIZE);
+							free_count += STACK_SIZE - PAGE_SIZE;
+							stack_vaild[i][j] &= ~mask;
+						}
+						spin_unlock_bit(&stack_map[i][j],k);
+					}
+					mask <<= 1;
+				}
+			}
+		}
+	}
+	return free_count;
+}
+#endif
+
+
 static void search_next(){
 	struct KMCB * cur;
 	u64 count;
@@ -143,7 +254,7 @@ static void search_next(){
 	if(last_block < __last_block){
 		cur = first_empty = last_block + 1;
 		last_block += PAGE_SIZE/sizeof(struct KMCB);
-		page = get_free_page(0,0);
+		page = get_free_page(0,0,0);
 		put_page(page,NULL,cur);
 		memset(cur,0,PAGE_SIZE);
 	}
@@ -207,7 +318,7 @@ void * kmalloc(size_t size,unsigned int align){
 				search_next();//搜索下一个可用的块
 				UnlockEmpty();
 				if(!cur->vaild){
-					page = get_free_page(0,0);
+					page = get_free_page(0,0,0);
 					put_page(page,NULL,(void*)((cur - first_block) * PAGE_SIZE + ker_heap_base));
 					cur->vaild = 1;
 				}
@@ -261,7 +372,7 @@ void * kmalloc(size_t size,unsigned int align){
 				search_next();
 				UnlockEmpty();
 				if(!cur->vaild){
-					page = get_free_page(0,0);
+					page = get_free_page(0,0,0);
 					put_page(page,NULL,(void*)((cur - first_block) * PAGE_SIZE + ker_heap_base));
 					cur->vaild = 1;
 				}
@@ -309,7 +420,7 @@ void * kmalloc(size_t size,unsigned int align){
 					return NULL;
 				}
 				last_block++;
-				page = get_free_page(0,0);
+				page = get_free_page(0,0,0);
 				put_page(page,NULL,last_block);
 				memset(last_block,0,PAGE_SIZE);
 				last_block += 1023;
@@ -346,7 +457,7 @@ void * kmalloc(size_t size,unsigned int align){
 				cur = first;
 				for(t = 0;t < size;t++){//逐个检查块是否可用
 					if(!cur[t].vaild){
-						page = get_free_page(0,0);
+						page = get_free_page(0,0,0);
 						put_page(page,NULL,(void*)((cur - first_block) * PAGE_SIZE + ker_heap_base + t * PAGE_SIZE));
 						cur[t].vaild = 1;
 					}
@@ -446,7 +557,7 @@ void vfree(void * addr){
 void ker_heap_init(){
 	u64 page;
 	
-	page = get_free_page(0,0);
+	page = get_free_page(0,0,0);
 	put_page(page,NULL,first_block);
 	memset(first_block,0,0x1000);
 	first_empty = first_block;

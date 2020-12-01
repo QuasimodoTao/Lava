@@ -1,4 +1,4 @@
-KER = time.o timer.o schedule.o switch.o
+KER = time.o timer.o schedule.o switch.o syscall.o
 INC = ../inc/
 CC = gcc -c -Os $< -I $(INC) -fno-builtin -o $@
 SHELL = cmd.exe
@@ -22,5 +22,7 @@ schedule.o : schedule.c $(INC)lava.h $(INC)stddef.h $(INC)kernel.h $(INC)mm.h $(
 switch.o : switch.s
 	gcc -c -o $@ -Os $<
 
+syscall.o : syscall.c $(INC)stdio.h $(INC)stddef.h $(INC)kernel.h
+	$(CC)
 clean :
 	-del ker.o $(KER)

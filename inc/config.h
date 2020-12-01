@@ -20,6 +20,9 @@
 #ifndef _CONFIG_H_
 #define _CONFIG_H_
 
+#define SPEARATE_STACK
+
+
 //adjustable
 #define MAX_CPU_COUNT		32
 #define IRQ_START_INT       0x20       
@@ -29,6 +32,7 @@
 //#define VM_DEBUG
 #define IRQ_DE_CHECK
 #define CPU_TIME_UPDATA_IPI	0
+#define CPU_SCHEDULE_IPI    1
 #define CPU_TIME			10
 
 
@@ -101,14 +105,22 @@
 #define PMEMEND			0xffff807fffffffffLL
 #define IDT_BASE        (PIDT_BASE | PMEMSTART)
 #define GDT_BASE        (PGDT_BASE | PMEMSTART)
-//0xffff8080_00000000 - 0xffff8040_007fffff 8MB For thread list
+//0xffff8040_00000000 - 0xffff8040_007fffff 8MB For thread list
 #define TLB             0xffff804000000000
 #define MAX_THREAD      1024*1024
-//0xffff8080_01000000 - 0xffff8040_01ffffff 16MB Kernel heap control base
+//0xffff8040_01000000 - 0xffff8040_01ffffff 16MB Kernel heap control base
 #define MMHMCBB			0xffff804001000000LL
 #define MMHMCBL			0xffff804001fffffcLL
-//0xffff8084_00000000 - 0xffff8047_ffffffff 16GB Kernel heap
+//0xffff8044_00000000 - 0xffff8047_ffffffff 16GB Kernel heap
 #define MMHSB			0xffff804400000000LL
+//0xffff8048_00000000 - 0xffff804b_ffffffff 16KB * 1024 * 1024 Kernel Stack.
+//per enter is 16KB,but lower 4KB is NULL,to ensure we will know when stack overflow.
+#ifdef SPEARATE_STACK
+#define STACK_BASE      0xffff804800000000LL
+#define STACK_SIZE      0x4000
+#else
+#define STACK_SIZE      0x1000
+#endif
 
 //MP start up IPI vector
 #define AP_ENT_VECTOR			0x01

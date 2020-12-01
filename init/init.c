@@ -99,13 +99,21 @@ int test_thread(void * none){
 int init_thread_entry(void*none){
 	volatile int i;
 	int j;
+	u64 * double_fault_stack;
 
+	IE();
 	spin_unlock_bit(ADDRP2V(PROCESS_INIT_MUTEX),0);
+	double_fault_stack = kmalloc(PAGE_SIZE,PAGE_SIZE);
+	double_fault_stack += PAGE_SIZE/sizeof(u64);
+	double_fault_stack--;
+	write_private_dword(TSS.reg[ISTL(1)],(u64)double_fault_stack);
+	write_private_dword(TSS.reg[ISTH(1)],(u64)double_fault_stack >> 32);
+
 	*(u64*)PADDR2V(get_cr3()) = 0;
 	for(i = 0;i < sizeof(task)/sizeof(struct _TASK_);i++){
 		if(task[i].need){
 			for(j = 0;j < 32;j++){
-				if(bt(&task[i].need,j)) while(!bt(&(task[j].lock),1)) nop();
+				if(bt(&task[i].need,j)) while(!bt(&(task[j].lock),1)) pause();
 			}
 		}
 		if(!spin_try_lock_bit(&(task[i].lock),0)){
@@ -114,14 +122,15 @@ int init_thread_entry(void*none){
 			bts(&(task[i].lock),1);
 		}
 	}
+	SD();
 	printk("Process %d activing.\n",GetCPUId());
+	SE();
 	while(1) halt();
 }
 void __attribute__((noreturn)) ap_entry_point(){//AP start at here
 	paging_init_ap();
 	sdt_init_ap();
 	private_data_init();
-	SD();
 	lapic_init();
 	apic_enable();
 	put_cr3(create_paging());
@@ -136,7 +145,6 @@ void  __attribute__((noreturn)) entry_point(struct _MSG_ * msg){//BSP start at h
 	ker_heap_init();
 	sdt_init_bp();
 	private_data_init();
-	SD();
 	syscall_init();
 	fs_init();
 	mp_init();

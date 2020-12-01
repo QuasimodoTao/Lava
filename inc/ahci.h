@@ -295,26 +295,26 @@ struct _PRDTI_ {
 	uint32_t i:1;
 };
 
-struct _AHCI4ATA_ {//DMA area
-	struct _AHCI_CMD_ {
-		volatile uint8_t r_fis[64];
-		volatile uint8_t acmd[16];
-		uint8_t rvd[48];
-		volatile u8 data_block[8][16];//struct _PRDTI_
-	} cmd[32];//8192
-	volatile u8 solt[32][32];//1024,struct _CLS_
-	struct _AHCI_RECIVE_FIS_ {
-		volatile uint8_t d_fis[0x1c];
-		uint8_t rvd0[4];
-		volatile uint8_t p_fis[0x14];
-		uint8_t rvd1[0x0c];
-		volatile uint8_t r_fis[0x14];
-		uint8_t rvd2[4];
-		volatile uint8_t sdbfis[8];
-		volatile uint8_t u_fis[64];
-		uint8_t rvd3[0x60];
-	} fis;//256,we not suppose pmp,so need't align to 4K
-};
+struct _AHCI_CMD_ {
+	volatile uint8_t r_fis[64];
+	volatile uint8_t acmd[16];
+	uint8_t rvd[48];
+	volatile u8 data_block[8][16];//struct _PRDTI_
+};//256
+struct _AHCI_SOLT_ {
+	volatile u8 solt[32][32];
+};//1024
+struct _AHCI_FIS_ {
+	volatile uint8_t d_fis[0x1c];
+	uint8_t rvd0[4];
+	volatile uint8_t p_fis[0x14];
+	uint8_t rvd1[0x0c];
+	volatile uint8_t r_fis[0x14];
+	uint8_t rvd2[4];
+	volatile uint8_t sdbfis[8];
+	volatile uint8_t u_fis[64];
+	uint8_t rvd3[0x60];
+} ;//256,we not suppose pmp,so need't align to 4K
 
 struct _AHCI_ {
 	struct _AHCI_ * next;

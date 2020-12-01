@@ -31,8 +31,6 @@
 #define MUTEX_ALLOC			(1 << MUTEX_ALLOC_BIT)
 #define MUTEX_KILLING		(1 << MUTEX_KILLING_BIT)
 #define MUTEX_LOCKED		8
-
-
 typedef struct _MUTEX_ {
 	u32 gst;
 	volatile int flags;

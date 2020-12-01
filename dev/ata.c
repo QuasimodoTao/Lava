@@ -25,6 +25,7 @@
 #include <mm.h>
 #include <gst.h>
 #include <stdio.h>
+#include <string.h>
 
 #define ATA_TYPE_AHCI		0
 #define ATA_TYPE_IDE		1
@@ -43,14 +44,17 @@ struct _ATA_ {
 			struct _HBA_ * hba;
 			struct _AHCI_PORT_ * h_port;
 			struct _AHCI_ * ahci;
-			struct _AHCI4ATA_ * s_port;
-		};
+			struct _AHCI_CMD_ * cmd[32];
+			struct _AHCI_SOLT_ * solt;
+			struct _AHCI_FIS_ * fis;
+			u16 * ident;
+		} ahci;
 		struct{
 			u16 port_base;
 			u16 ctrl_base;
-		};
+			u16 ident[256];
+		} leg;
 	};
-	u16 ident[256];
 	struct _DISK_CMD_ cmd;
 	wchar_t path[32];//L"/.dev/ata%d.dev"
 	FCPEB fc;
@@ -74,9 +78,9 @@ static int ata_on_ahci_do_cmd(struct _ATA_ * ata,struct _ATA_CMD_ * cmd){
 	struct _CLS_ solt;
 	struct _PRDTI_ item;
 	
-	ata->h_port->ie = 0;
-	ata->h_port->is = 0xffffffff;
-	ata->h_port->serr = 0xffffffff;
+	ata->ahci.h_port->ie = 0;
+	ata->ahci.h_port->is = 0xffffffff;
+	ata->ahci.h_port->serr = 0xffffffff;
 	fis0.type = 0x27;
 	fis0.pmp = 0;
 	fis0.c = 1;
@@ -93,9 +97,9 @@ static int ata_on_ahci_do_cmd(struct _ATA_ * ata,struct _ATA_CMD_ * cmd){
 	fis0.lba5 = cmd->lba >> 40;
 	fis0.cnt0 = cmd->cnt;
 	fis0.cnt1 = cmd->cnt >> 8;
-	item.dba = ADDRV2P(NULL,&cmd->buf);
+	item.dba = ADDRV2P(NULL,cmd->buf);
 	item.dbc = cmd->cnt * 512 - 1;
-	memcpy(&solt,(void*)&(ata->s_port->solt[0]),sizeof(solt));
+	memcpy(&solt,&(ata->ahci.solt[0]),sizeof(solt));
 	solt.cfl = sizeof(fis0)/sizeof(u32);
 	solt.a = 0;
 	solt.w = cmd->direct == CMD_DIRECT_READ ? 0 : 1;
@@ -111,17 +115,17 @@ static int ata_on_ahci_do_cmd(struct _ATA_ * ata,struct _ATA_CMD_ * cmd){
 		solt.c = 1;
 		
 	}
-	memcpy((void*)&(ata->s_port->cmd[0].r_fis),&fis0,sizeof(fis0));
-	memcpy((void*)&(ata->s_port->cmd[0].data_block[0]),&item,sizeof(item));
-	memcpy((void*)&(ata->s_port->solt[0]),&solt,sizeof(solt));
+	memcpy((void*)&(ata->ahci.cmd[0]->r_fis),&fis0,sizeof(fis0));
+	memcpy((void*)&(ata->ahci.cmd[0]->data_block[0]),&item,sizeof(item));
+	memcpy((void*)&(ata->ahci.solt[0]),&solt,sizeof(solt));
 	
-	ata->h_port->cmd |= HBA_PxCMD_ST | HBA_PxCMD_FRE;
-	ata->h_port->ci = 1;
-	while(!(ata->h_port->is & (HBA_PxIS_DHRS | HBA_PxIS_TFES)));
-	ata->h_port->is |= HBA_PxIE_DHRE;
-	ata->h_port->cmd &= ~(HBA_PxCMD_ST | HBA_PxCMD_FRE);
-	while(ata->h_port->cmd & HBA_PxCMD_FR);
-	memcpy(&fis1,(void*)&(ata->s_port->fis.r_fis),sizeof(fis1));
+	ata->ahci.h_port->cmd |= HBA_PxCMD_ST | HBA_PxCMD_FRE;
+	ata->ahci.h_port->ci = 1;
+	while(!(ata->ahci.h_port->is & (HBA_PxIS_DHRS | HBA_PxIS_TFES)));
+	ata->ahci.h_port->is |= HBA_PxIE_DHRE;
+	ata->ahci.h_port->cmd &= ~(HBA_PxCMD_ST | HBA_PxCMD_FRE);
+	while(ata->ahci.h_port->cmd & HBA_PxCMD_FR);
+	memcpy(&fis1,(void*)&(ata->ahci.fis->r_fis),sizeof(fis1));
 	return fis1.err;
 }
 static LPSTREAM ata_open(wchar_t * name,u64 mode,struct _FCPEB_ * fc){
@@ -220,9 +224,9 @@ void * ata_on_ahci_open(struct _AHCI_ * ahci,int port){
 	int i;
 	struct _FIS_REG_H2D_ rfis;
 	struct _FIS_REG_D2H_ rfis2;
-	u16 * ident;
 	struct _PRDTI_ item;
 	struct _ATA_CMD_ cmd;
+	struct _ATA_CMD_ * _cmd;
 	
 	{//ata struct init
 		ata = kmalloc(sizeof(struct _ATA_),0);
@@ -233,37 +237,49 @@ void * ata_on_ahci_open(struct _AHCI_ * ahci,int port){
 		ata->ata_number = xaddd(&ata_counter,1);
 		ata->port = port;
 		ata->type = ATA_TYPE_AHCI;
-		ata->h_port = (void*)&(ahci->hba->port[i]);
-		ata->hba = (void*)ahci->hba;
-		ata->ahci = ahci;
+		ata->ahci.h_port = (void*)&(ahci->hba->port[i]);
+		ata->ahci.hba = (void*)ahci->hba;
+		ata->ahci.ahci = ahci;
 	}
 	{//ahci port init
-		ata->s_port = kmalloc(sizeof(struct _AHCI4ATA_),4096);
-		page_uncacheable(NULL,ata->s_port,sizeof(struct _AHCI4ATA_));//DMA space
-		memset(ata->s_port,0,sizeof(struct _AHCI4ATA_));
-		ata->h_port->clb = ADDRV2P(NULL,(void*)&(ata->s_port->solt));
-		ata->h_port->fb = ADDRV2P(NULL,&(ata->s_port->fis));
-		addr = ADDRV2P(NULL,&(ata->s_port->cmd[0]));
+		_cmd = PADDR2V(get_free_page(0,0,ata->ahci.hba->cap & HBA_CAP_S64A ? 0 : 32));
+		for(i = 0;i < 16;i++){
+			ata->ahci.cmd[i] = _cmd + i;
+		}
+		_cmd = PADDR2V(get_free_page(0,0,ata->ahci.hba->cap & HBA_CAP_S64A ? 0 : 32));
+		for(i = 0;i < 16;i++){
+			ata->ahci.cmd[i + 16] = _cmd + i;
+		}
+		ata->ahci.solt = PADDR2V(get_free_page(0,0,ata->ahci.hba->cap & HBA_CAP_S64A ? 0 : 32));
+		ata->ahci.fis = (void*)(((u64)ata->ahci.solt) + sizeof(struct _AHCI_SOLT_));
+		ata->ahci.ident = (void*)(((u64)ata->ahci.fis) + sizeof(struct _AHCI_FIS_));
+		page_uncacheable(NULL,ata->ahci.cmd[0],PAGE_SIZE);//DMA space
+		page_uncacheable(NULL,ata->ahci.cmd[16],PAGE_SIZE);//DMA space
+		page_uncacheable(NULL,ata->ahci.solt,PAGE_SIZE);//DMA space
+		
+		ata->ahci.h_port->clb = ADDRV2P(NULL,ata->ahci.solt);
+		ata->ahci.h_port->fb = ADDRV2P(NULL,ata->ahci.fis);
 		memset(&solt,0,sizeof(solt));
 		solt.cfl = sizeof(struct _FIS_REG_H2D_) / sizeof(u32);
 		solt.prdtl = 8;
+		addr = ADDRV2P(NULL,ata->ahci.cmd[0]);
 		for(i = 0;i < 16;i++){
 			solt.ctba = addr;
 			addr += sizeof(struct _AHCI_CMD_);
-			memcpy((void*)&(ata->s_port->solt[i]),&solt,sizeof(solt));
+			memcpy(&(ata->ahci.solt[i]),&solt,sizeof(solt));
 		}
-		addr = ADDRV2P(NULL,&(ata->s_port->cmd[16]));
+		addr = ADDRV2P(NULL,ata->ahci.cmd[16]);
 		for(;i < 32;i++){
 			solt.ctba = addr;
 			addr += sizeof(struct _AHCI_CMD_);
-			memcpy((void*)&(ata->s_port->solt[i]),&solt,sizeof(solt));
+			memcpy(&(ata->ahci.solt[i]),&solt,sizeof(solt));
 		}
 	}
-	ata->solts = ((ahci->hba->cap & HBA_CAP_NCS) >> 8) + 1; 
+	ata->ahci.solts = ((ahci->hba->cap & HBA_CAP_NCS) >> 8) + 1; 
 	if(ahci->hba->cap & HBA_CAP_SPM && //HBA must suppose PMP
 		ahci->hba->cap & HBA_CAP_FBSS &&//HBA must suppose FIS-base switch if want to suppose PMP
-		ata->h_port->cmd & HBA_PxCMD_FBSCP) //Port must suppose FIS-base switch is want to suppose PMP
-		ata->h_port->cmd &= ~HBA_PxCMD_PMA;//we not suppose PMP
+		ata->ahci.h_port->cmd & HBA_PxCMD_FBSCP) //Port must suppose FIS-base switch is want to suppose PMP
+		ata->ahci.h_port->cmd &= ~HBA_PxCMD_PMA;//we not suppose PMP
 	{//map device into file system
 		wsprintf(ata->path,32,L"/.dev/ata%d.dev",ata->ata_number);
 		memcpy(&(ata->fc),&ata_fc,sizeof(FCPEB));
@@ -271,10 +287,8 @@ void * ata_on_ahci_open(struct _AHCI_ * ahci,int port){
 		fs_map(ata->path,&(ata->fc));
 	}
 	{//get disk identity
-		ident = kmalloc(512,2);
-		page_uncacheable(NULL,ident,512);//set DMA space
 		cmd.lba = 0;
-		cmd.buf = (u64)ident;
+		cmd.buf = ata->ahci.ident;
 		cmd.cnt = 1;
 		cmd.cmd = 0xec;//get identity
 		cmd.direct = CMD_DIRECT_READ;
@@ -289,24 +303,21 @@ void * ata_on_ahci_open(struct _AHCI_ * ahci,int port){
 			}
 		}
 	}
-	memcpy(ata->ident,ident,512);
-	ata->sectors = ((u64)ident[100]) + (((u64)ident[101]) << 16) + (((u64)ident[102]) << 32);
+	ata->sectors = ((u64)ata->ahci.ident[100]) + (((u64)ata->ahci.ident[101]) << 16) + (((u64)ata->ahci.ident[102]) << 32);
 	printk("ATA %d on AHCI %d total %lld sectors.\n",ata->ata_number,ata->port,ata->sectors);
 	for(i = 0;i < 10;i++){
-		printk("%c%c",ident[10 + i] >> 8,ident[10+i]);
+		printk("%c%c",ata->ahci.ident[10 + i] >> 8,ata->ahci.ident[10+i]);
 	}
 	printk(".\n");
 	for(i = 0;i < 4;i++){
-		printk("%c%c",ident[23 + i] >> 8,ident[23+i]);
+		printk("%c%c",ata->ahci.ident[23 + i] >> 8,ata->ahci.ident[23+i]);
 	}
 	printk(".\n");
 	for(i = 0;i < 20;i++){
-		printk("%c%c",ident[27 + i] >> 8,ident[27+i]);
+		printk("%c%c",ata->ahci.ident[27 + i] >> 8,ata->ahci.ident[27+i]);
 	}
 	printk(".\n");
-	printk("%P.\n",ident);
-	page_cacheable(NULL,ident,512);
-	kfree(ident);
+	printk("%P.\n",ata->ahci.ident);
 	return ata;
 }
 int ata_on_ahci_int_handle(struct _AHCI_ * ahci,void * ata){
@@ -314,19 +325,13 @@ int ata_on_ahci_int_handle(struct _AHCI_ * ahci,void * ata){
 }
 int ata_on_ahci_power_on(struct _AHCI_ * ahci,void * ata){
 	
-	
 }
 int ata_on_ahci_power_off(struct _AHCI_ * ahci,void * ata){
-	
 	
 }
 int ata_on_ahci_close(struct _AHCI_ * ahci,void * ata){
 	
-	
-	
 }
 int ata_on_ahci_restart(struct _AHCI_ * ahci,void * ata){
-	
-	
 	
 }

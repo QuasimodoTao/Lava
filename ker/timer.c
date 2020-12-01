@@ -64,10 +64,10 @@ void counter_updata(){//中断代码，要求处理器禁止调度
 	ID();
 	LockTimerList(timer_list);
 	cur = timer_list->next;
-	if(cur != timer_list){
+	if(cur && cur != timer_list){
 		LockTimerList(cur);
 		UnlockTimerList(timer_list);
-		while(cur != timer_list){
+		while(cur && cur != timer_list){
 			if(!TryLockTimerField(cur)){
 				if(!(cur->mode & 0x01) && !(ticks ^ cur->next_ticks)){
 					if(cur->mode == TMR_MOD_ONCE) cur->mode = TMR_MOD_ONCE_HLT;

@@ -32,7 +32,6 @@
 #include <semaphore.h>
 #include <error.h>
 
-
 void thread_exit(u64 rsp,void * entry,LPTHREAD thread);
 LPTHREAD switch_task_b(u64 * osp,u64 nsp,LPTHREAD thread);
 
@@ -40,11 +39,11 @@ static LPPROCESS process_list;
 static volatile u32 process_count;
 static volatile u32 thread_count = 0;
 static int list_busy = 0;
-static LPTHREAD killing_thread = NULL;
 static volatile int need_updata_schedule = 0;
 static volatile int updata_count = 0;
-static volatile short current_thread_max = 0;
-static volatile short freshing_cur_max = 0;
+static volatile unsigned int current_thread_max = 0;
+static volatile int freshing_cur_max = 0; 
+static volatile int need_destory = 0;
 
 #define thread_list			((struct _THREAD_ **)TLB)
 #define PROCESS_LIST_BUSY_BIT	0
@@ -69,7 +68,7 @@ static int find_first_empty(){
 				return i;//成功返回值
 			}
 		freshing_cur_max = 1;//设置正在更新标志
-		if(cmpxchg2b(&current_thread_max,cur,cur + PAGE_SIZE/sizeof(void*),NULL)){//抢占更新权
+		if(cmpxchg4b(&current_thread_max,cur,cur + PAGE_SIZE/sizeof(void*),NULL)){//抢占更新权
 			while(freshing_cur_max);//抢占失败则等待
 			if(current_thread_max == cur) {//前后值相等，说明没有更多空位了
 				lflags(rf);
@@ -80,11 +79,11 @@ static int find_first_empty(){
 		real = cur;//
 		cur += PAGE_SIZE/sizeof(void*);
 		if(cur > MAX_THREAD){
-			xaddw(&current_thread_max,-(PAGE_SIZE/sizeof(void*)));//恢复值
+			xaddd(&current_thread_max,-(PAGE_SIZE/sizeof(void*)));//恢复值
 			lflags(rf);
 			return -1;
 		}
-		page = get_free_page(0,0);//映射页面
+		page = get_free_page(0,0,0);//映射页面
 		memset(PADDR2V(page),0,PAGE_SIZE);
 		put_page(page,NULL,thread_list+ real);
 		freshing_cur_max = 0;
@@ -93,42 +92,6 @@ static int find_first_empty(){
 
 //将进程从进程链表中移出
 void remove_process(LPPROCESS process){
-///	LPPROCESS prev,next;
-///	
-///	ID();
-///	next = xchgq(&(process->next),NULL);
-///	if(!process->prev){
-///		//i am first of list
-///rep:
-///		if(cmpxchg8b(&list,process,next,NULL)){
-///			//there are/is some/one node(s) inserting list
-///			while(!process->prev);
-///			process->prev->next = process->next;
-///			if(next) next->prev = process->prev;
-///			IE();
-///			return;
-///		}
-///		else{
-///			if(next) next->prev = NULL;
-///			IE();
-///			return;
-///		}
-///	}
-///	//i am not first of list
-///	while(1){
-///		prev = process->prev;
-///		if(prev)
-///			if(!cmpxchg8b(&(prev->next),process,next,NULL)) {
-///				if(next) next->prev = process->prev;//i am last
-///				IE();
-///				return;
-///			}
-///			else
-///				while(prev == process->prev);
-///		else 
-///			goto rep;
-///	}
-
 	ID();
 	LockProcessGlobalList();//D0
 	process_count--;
@@ -156,16 +119,6 @@ void remove_process(LPPROCESS process){
 }
 //将进程插入到链表中
 void insert_process(LPPROCESS process){
-	///LPPROCESS next;
-	///process->prev = process->next = NULL;
-	///ID();
-	///next = xchgq(&list,process);
-	///if(next) 
-	///	while(next->prev);
-	///process->next = next;
-	///if(next) next->prev = process;
-	///IE();
-	
 	LPPROCESS _process;
 	ID();
 	LockProcessGlobalList();
@@ -283,12 +236,13 @@ void schedule2(){
 	u64 * pdb;
 	int cur_max;
 	int time = 0;
+	LPPROCESS process;
 	
 	lock_btr_private(flags,CPU_FLAGS_NEED_SCHEDULE);
 	write_private_dword(cpu_time,CPU_TIME);
 	while(freshing_cur_max);
 	cur_max = current_thread_max;
-	ID(); SD();
+	ID();
 	old = GetCurThread();
 	next = thread_list + old->solt + 1;
 	while(1){
@@ -296,19 +250,27 @@ void schedule2(){
 			next = thread_list;
 			time++;
 			if(time > 4) {
-				IE();SE();
+				IE();
 				return;
 			}
 		}
-		if(!(new = *next) || new->flags != TF_ACTIVE || TryLockThreadStatus(new)) {
+		if((!(new = *next)) || 
+			(u64)new == 1 || 
+			new->flag != TF_ACTIVE || 
+			TryLockThreadStatus(new)) {
 			next++;
 			continue;
 		}
 		new->processor = GetCPUId();
 		pdb = PADDR2V(get_cr3());
+		if(!new->father){
+			cli();
+			printk("thread %P,%d on bug,%P,%d.\n",new,new->id,old,old->id);
+			stop();
+		}
 		if(new->father != GetCurProcess()){
 			SetCurProcess(new->father);
-			memcpy(pdb,new->father->pdbe,256 * 8);
+			memcpy(pdb,new->father->pdbe,255 * 8);
 		}
 		pdb[USER_STACK_P4E_INDEX] = new->user_stack_p4e;
 		fpg();
@@ -317,11 +279,15 @@ void schedule2(){
 		if(suppose_sysenter) wrmsr(IA32_SYSENTER_ESP,new->ker_ent_rsp);//切换内核堆栈入口
 		write_private_dword(TSS.reg[RSPL(0)],new->ker_ent_rsp & 0x00000000ffffffff);//切换内核堆栈入口
 		write_private_dword(TSS.reg[RSPH(0)],new->ker_ent_rsp >> 32);//切换内核堆栈入口
+		//printk("Switch to %P.",new);
 		old = switch_task_b(&(old->rsp),new->rsp,old);
 		UnlockThreadStatus(old);
-		IE();SE();
-		if(old->flags == TF_DESTORY)
-			kill(old);
+		IE();
+		if(old->flag == TF_DESTORY){
+			thread_list[old->solt] = NULL;
+			free_stack(old->stack);
+			kfree(old);
+		}
 		return;
 	}
 }
@@ -344,17 +310,11 @@ static int updata_schedule_receive(){
 	if(xaddd(&updata_count,-1) == 1) need_updata_schedule = 0;
 	return 0;
 }
-static int updata_schedule_send(){
+void schedule(){
+	int i;
 	updata_count = 0;
 	need_updata_schedule = 1;
 	send_ipi(CPU_TIME_UPDATA_IPI,0,1,IPIM_ALL_EX);
-}
-void schedule(){
-	//static int count = 0;
-	int i;
-	//count++;
-	//if(count == 10) {updata_schedule_send(); count = 0;}
-	updata_schedule_send();
 	if((i = read_private_dword(cpu_time)) > 0){
 		write_private_dword(cpu_time,i-1);
 		return;
@@ -366,93 +326,41 @@ void schedule(){
 void __attribute__((noreturn)) exit(int code){
 	LPTHREAD thread;
 	LPPROCESS process;
-	
 	thread = GetCurThread();
-	ID();
-	thread->flags = TF_DESTORY;
-	remove_process_thread(thread->father,thread);
-	if(!thread->father->thread_count){
-		thread->father->ret = code;
-		process = thread->father;
-		if(process->by_shell) {
-			if(process->f_thread) wake_up(process->f_thread);
-		}
-		else{
-			if(process->image_name) kfree(process->image_name);
+	cli();
+	free_area(thread,0x00007f8000000000,0x0000007ffffff000);
+	process = thread->father;
+	remove_process_thread(process,thread);
+	thread->father->ret = code;
+	if(!process->thread_count){
+		free_page_table(process);
+		if(process->image_name) kfree(process->image_name);
+		if(process->by_shell) wake_up(process->father);
+		else {
+			remove_process(process);
 			kfree(process);
 		}
 	}
-	timer_free(thread->timer);
-	free_area(thread,0x00007ff000000000,0x0000000fffffefff);
-	if(thread = xchgq(&killing_thread,thread)) {
-		kfree(thread->stack);
-		thread_list[thread->solt] = NULL;
-		kfree(thread);
-	}
-	write_private_dword(cpu_time,0);
-	IE();
+	cli();
+	//printk("destory %P.",thread);
+	thread->flag = TF_DESTORY;
+	thread_list[thread->solt] = NULL;
 	schedule2();
 }
-static int raw_kill(LPTHREAD thread){
-	LPPROCESS process;
-	
-	thread->flags = TF_DESTORY;
-	remove_process_thread(thread->father,thread);
-	if(!thread->father->thread_count){
-		thread->father->ret = -1;
-		process = thread->father;
-		if(process->by_shell) {
-			if(process->f_thread) wake_up(process->f_thread);
-		}
-		else{
-			if(process->image_name) kfree(process->image_name);
-			kfree(process);
-		}
-	}
-	timer_free(thread->timer);
-	kfree(thread->stack);
-	thread_list[thread->solt] = NULL;
-	kfree(thread);
-}
 int kill(LPTHREAD thread){
-	LPPROCESS process;
-	int ret;
-	
-	if(!thread || thread == GetCurThread()) exit(-1);
-	if(!addr_vaild(NULL,thread) || thread->gst != GST_THREAD) return -1;
-	ID();
-	if(TryLockThreadStatus(thread)){
-		lock_bts(&thread->flags,THREAD_KILL_WHEN_WAKE_BIT);
-		thread->flags = TF_DESTORY;
-		IE();
-		return 0;
-	}
-	ret = raw_kill(thread);
-	IE();
-	return ret;
+	if(!thread || thread == GetCurThread()) exit(ERR_BE_DESTORY);
+	if(!addr_vaild(NULL,thread) || thread->gst != GST_THREAD) return ERR_INVAILD_PTR;
+	thread->need_destory = 1;
+	send_ipi(CPU_SCHEDULE_IPI,thread->processor,0,IPIM_FIXED);
+	return 0;
 }
 int wake_up(LPTHREAD thread){
 	LPTHREAD _thread;
 	int ret;
-	
-	//printk("weak up thread %d,%d.\n",thread->id,thread->flags);
-	if(!thread || !addr_vaild(NULL,thread) || thread->gst != GST_THREAD) return -1;
-	if(cmpxchg4b(&thread->flags,TF_BLOCK,TF_ACTIVE,NULL)){
-		if(lock_bts(&thread->flags,THREAD_KILL_WHEN_WAKE_BIT)){
-			ID();
-			ret = raw_kill(thread);
-			IE();
-			return ret;
-		}
-		else{
-			//error
-			
-			
-		}
-	}
-	else{
-		if(GetCurThread()->solt < processor_count) schedule2();
-	}
+
+	if(!thread || !addr_vaild(NULL,thread) || thread->gst != GST_THREAD) return ERR_INVAILD_PTR;
+	thread->flag = TF_ACTIVE;
+	if(GetCurThread()->solt < processor_count) schedule2();
 	return 0;
 }
 static void wait_call_back(LPTIMER timer,LPTHREAD thread){
@@ -460,137 +368,22 @@ static void wait_call_back(LPTIMER timer,LPTHREAD thread){
 }
 int wait(int msecond){
 	LPTHREAD thread;
+	LPTIMER timer;
 	int ret;
 	
+	thread = GetCurThread();
 	if(msecond){
-		thread = GetCurThread();
-		if(cmpxchg4b(&thread->flags,TF_ACTIVE,TF_BLOCK,NULL)){
-			if(lock_bts(&thread->flags,THREAD_KILL_WHEN_WAKE_BIT)){
-				exit(-1);
-			}
-			else{
-				//error
-				
-				
-			}
-		}
-		timer_reset(thread->timer,msecond,TMR_MOD_ONCE,wait_call_back,thread);
-		timer_start(thread->timer);
+		timer_alloc(msecond,TMR_MOD_ONCE,wait_call_back,thread);
+		timer_start(timer);
+		timer_free(timer);
 	}
-	schedule2();
+	else schedule2();
+	if(thread->need_destory) exit(ERR_BE_DESTORY);
 	return 0;
 }
-
-/*
-Mutex
-Wait();
-	if(CheckArgument()) return ERR;
-	if(mutex->flags & MUTEX_LOCKED){
-		if(!time) return ERR_BUSY;
-		InserIntoWaitList();
-		RemoveFromActiveList();
-		InsertIntoBlockList();
-		UpdataDestoryData();
-		Thread->semaphore_val = 0;
-		if(time != INFINE) ResetTimer();
-		Schedule();
-		if(IsKilling()){
-			if(time != INFINE) StopTimer();
-			return ERR;
-		}
-		RemoveFromWaitList();
-		if(thread->semaphore_val)//wake up by timer
-			return ERR_BUSY;
-	}
-	mutex->flags |= MUTEX_LOCKED;
-	if(mutex->release.head) WakeUp();
-	return 0;
-Release();
-	if(CheckArgument()) retunr ERR;
-	if(!(mutex->flags & MUTEX_LOCKED)){
-		if(!time) return ERR_BUSY;
-		InsertIntoReleaseList();
-		RemoveFromActiveList();
-		InsertIntoBlockList();
-		UpdataDestoryData();
-		Thread->semaphore_val = 0;
-		if(time != INFINE) ResetTimer();
-		Schedule();
-		if(IsKilling){
-			if(time != INFINE) StopTimer();
-			return ERR;
-		}
-		RemoveFromReleaseList();
-		if(thread->semaphore_val) return ERR_BUSY;
-	}
-	mutex->flags &= ~MUTEX_LOCKED;
-	if(mutex->wait_head) WakeUp();
-	return 0;
-
-Semaphore
-Wait();
-	if(CheckArgument()) return ERR;
-	if(se->wait.head || se->cur < val){
-		if(!time) return ERR_BUSY;
-		InsertIntoWaitList();
-		RemoveFromActiveList();
-		InsetIntoBlockList();
-		UpdataDestoryData();
-		Thread->semaphore_val = val;
-		if(time != INFINE) ResetTimer();	//if out of time,will wake up thread,but don't remove thread from wait list;
-		Schedule();
-		if(IsKilling(se)) {//if semaphore is killing, just return is enough;
-			if(time != INFINE) StopTimer();
-			return ERR;
-		}
-		if(se->cur < val){//wake up because of out of time;
-			//Might i am not the first one
-			if(CurThread == se->wait.head){
-				//if i am first one,should test second thread weather wake up;
-				RemoveFromWaitList();
-				if(se->wait.head && se->cur >= se->wait.head->semaphore_val) WakeUp();
-			}
-			else RemoveFromWaitList();//if i am not the first one,remove myself from wait list is complex.
-			return ERR_BUSY;
-		}
-		//wake up because resource is enough;
-		RemoveFromWaitList();
-	}
-	se->cur -= val;
-	if(se->release.head && se->max - se->cur >= se->release.head->semaphore_val) WakeUp();
-	if(se->wait.head && se->cur >= se->wait.head->semaphore_val) WakeUp();
-	return 0;
-Release();
-	if(heckArgument()) return ERR;
-	if(se->release.head || se->max - se->cur < val){
-		if(!time) return ERR_BUSY;
-		InsertIntoReleaseList();
-		RemoveFromActiveList();
-		InsertIntoBlockList();
-		UpdataDestoryData();
-		Thread->semaphore_val = val;
-		if(time != INFINE) ResetTimer();
-		Schedule();
-		if(IsKilling(se)) {//if semaphore is killing, just return is enough;
-			if(time != INFINE) StopTimer();
-			return ERR;
-		}
-		if(se->max - se->cur < val){
-			if(CurThread == se->release.head){
-				RemoveFromReleaseList();
-				if(se->release.head && se->release.head->semaphore_val + se->cur <= se->max) WakeUp();
-			}
-			else RemoveFromWaitList();
-			return ERR_BUSY;
-		}
-		RemoveFromReleaseList();
-	}
-	se->cur += val;
-	if(se->wait.head && se->cur >= se->wait.head->semaphore_val) WakeUp();
-	if(se->release.head && se->release.hread->semaphore_val + se->cur <= se->max) WakeUp();
-	return 0;
-*/
-
+int syscall_wait(msecond){
+	return wait(msecond);
+}
 int destory_mutex(struct _MUTEX_ * mutex){
 	struct _THREAD_ * thread;
 	
@@ -623,6 +416,7 @@ int wait_mutex(struct _MUTEX_ * mutex,int time){//抢占资源
 	LPTHREAD thread;
 	LPTHREAD * prev;
 	volatile LPTHREAD next;
+	LPTIMER timer;
 
 	if(!mutex) return ERR_INVAILD_PTR;//非法指针
 	thread = GetCurThread();
@@ -634,15 +428,7 @@ int wait_mutex(struct _MUTEX_ * mutex,int time){//抢占资源
 			IE();
 			return ERR_RESOURCE_BUSY;
 		}
-		if(cmpxchg4b(&thread->flags,TF_ACTIVE,TF_BLOCK,NULL)){
-			if(lock_bts(&thread->flags,THREAD_KILL_WHEN_WAKE_BIT)){
-				exit(-1);
-			}
-			else{
-				//error
-
-			}
-		}
+		thread->flag = TF_ACTIVE;
 		prev = mutex->wait.p;
 		mutex->wait.p = & next;
 		if(prev) * prev = thread;
@@ -650,13 +436,13 @@ int wait_mutex(struct _MUTEX_ * mutex,int time){//抢占资源
 		thread->semaphore_val = 0;
 		UnlockMutex(mutex);
 		if(time != -1){//有限等待则重启计时器
-			timer_reset(thread->timer,time,TMR_MOD_ONCE,mutex_timer_call_back,mutex);
-			timer_start(thread->timer);
+			timer = timer_alloc(time,TMR_MOD_ONCE,mutex_timer_call_back,mutex);
+			timer_start(timer);
 		}
 		IE();
 		schedule();//调度
+		if(time != -1) timer_free(timer);
 		if(mutex->flags & MUTEX_KILLING) {//若信号量正在销毁，则返回 无效的指针//if mutex is killing, just return is enough;
-			if(time != -1) timer_stop(thread->timer);
 			mutex->wait.t = next;
 			return ERR_INVAILD_PTR;
 		}
@@ -696,6 +482,7 @@ int release_mutex(struct _MUTEX_ * mutex,int time){
 	LPTHREAD thread;
 	LPTHREAD * prev;
 	volatile LPTHREAD next;
+	LPTIMER timer;
 	
 ///	if(heckArgument()) return ERR;
 	if(!mutex) return ERR_INVAILD_PTR;
@@ -710,29 +497,21 @@ int release_mutex(struct _MUTEX_ * mutex,int time){
 		}
 		
 		prev = mutex->release.p;
-		if(cmpxchg4b(&thread->flags,TF_ACTIVE,TF_BLOCK,NULL)){
-			if(lock_bts(&thread->flags,THREAD_KILL_WHEN_WAKE_BIT)){
-				exit(-1);
-			}
-			else{
-				//error
-
-			}
-		}
+		thread->flag = TF_ACTIVE;
 		mutex->release.p = & next;
 		if(prev) * prev = thread;
 		if(!mutex->release.t) mutex->release.t = thread;
 		thread->semaphore_val = 0;
 		UnlockMutex(mutex);
 		if(time != -1){//有限等待则重启计时器
-			timer_reset(thread->timer,time,TMR_MOD_ONCE,mutex_timer_call_back,mutex);
-			timer_start(thread->timer);
+			timer = timer_alloc(time,TMR_MOD_ONCE,mutex_timer_call_back,mutex);
+			timer_start(timer);
 		}
 		IE();
 		write_private_dword(cpu_time,0);
 		schedule();
+		if(time != -1) timer_free(timer);
 		if(mutex->flags & MUTEX_KILLING) {
-			if(time != -1) timer_stop(GetCurThread()->timer);
 			mutex->release.t = next;
 			return ERR_INVAILD_PTR;
 		}
@@ -776,7 +555,6 @@ int release_mutex(struct _MUTEX_ * mutex,int time){
 	return 0;
 }
 
-
 int destory_semaphore(struct _SEMAPHORE_ * se){
 	struct _THREAD_ * thread,*thread2;
 	
@@ -809,6 +587,7 @@ int wait_semaphore(int val,struct _SEMAPHORE_ * se,int time){//抢占资源
 	LPTHREAD thread;
 	LPTHREAD * prev;
 	LPTHREAD next;
+	LPTIMER timer;
 
 	if(!se) return ERR_INVAILD_PTR;//非法指针
 	if(!val) return 0;//不抢占任何资源则直接返回
@@ -822,15 +601,7 @@ int wait_semaphore(int val,struct _SEMAPHORE_ * se,int time){//抢占资源
 			IE();
 			return ERR_RESOURCE_BUSY;
 		}
-		if(cmpxchg4b(&thread->flags,TF_ACTIVE,TF_BLOCK,NULL)){
-			if(lock_bts(&thread->flags,THREAD_KILL_WHEN_WAKE_BIT)){
-				exit(-1);
-			}
-			else{
-				//error
-
-			}
-		}
+		thread->flag = TF_ACTIVE;
 		prev = se->wait.p;
 		se->wait.p = &next;
 		if(prev) * prev = thread;
@@ -839,12 +610,12 @@ int wait_semaphore(int val,struct _SEMAPHORE_ * se,int time){//抢占资源
 		UnlockSemaphore(se);
 		IE();
 		if(time != -1){//有限等待则重启计时器
-			timer_reset(thread->timer,time,TMR_MOD_ONCE,semaphore_timer_call_back,se);
-			timer_start(thread->timer);
+			timer = timer_alloc(time,TMR_MOD_ONCE,semaphore_timer_call_back,se);
+			timer_start(timer);
 		}
 		schedule();//调度
+		if(time != -1) timer_free(timer);
 		if(se->flags & SE_KILLING) {//若信号量正在销毁，则返回 无效的指针
-			if(time == -1) timer_stop(thread->timer);
 			se->wait.t = next;
 			return ERR_INVAILD_PTR;
 		}
@@ -889,6 +660,7 @@ int release_semaphore(int val,struct _SEMAPHORE_ * se,int time){
 	LPTHREAD thread;
 	LPTHREAD * prev;
 	volatile LPTHREAD next;
+	LPTIMER timer;
 	
 	if(!se) return ERR_INVAILD_PTR;
 	if(!val) return 0;
@@ -901,15 +673,7 @@ int release_semaphore(int val,struct _SEMAPHORE_ * se,int time){
 			IE();
 			return ERR_RESOURCE_BUSY;
 		}
-		if(cmpxchg4b(&thread->flags,TF_ACTIVE,TF_BLOCK,NULL)){
-			if(lock_bts(&thread->flags,THREAD_KILL_WHEN_WAKE_BIT)){
-				exit(-1);
-			}
-			else{
-				//error
-
-			}
-		}
+		thread->flag = TF_ACTIVE;
 		prev = se->release.p;
 		se->release.p = &next;
 		if(prev) * prev = thread;
@@ -918,12 +682,12 @@ int release_semaphore(int val,struct _SEMAPHORE_ * se,int time){
 		UnlockSemaphore(se);
 		IE();
 		if(time != -1){//有限等待则重启计时器
-			timer_reset(thread->timer,time,TMR_MOD_ONCE,semaphore_timer_call_back,se);
-			timer_start(thread->timer);
+			timer = timer_alloc(time,TMR_MOD_ONCE,semaphore_timer_call_back,se);
+			timer_start(timer);
 		}
 		schedule();
+		if(time != -1) timer_stop(timer);
 		if(se->flags & SE_KILLING) {//若信号量正在销毁，则返回 无效的指针
-			if(time == -1) timer_stop(thread->timer);
 			se->release.t = next;
 			return ERR_INVAILD_PTR;
 		}
@@ -970,10 +734,19 @@ static void thread_entry(int (*entry)(void*),LPTHREAD old){
 	LPPROCESS process;
 	LPTHREAD self;
 	
-	if(old) UnlockThreadStatus(old);
 	IE();
-	SE();
+	if(old) {
+		UnlockThreadStatus(old);
+		if(old->flag == TF_DESTORY){
+			free_stack(old->stack);
+			kfree(old);
+		}
+	}
 	self = GetCurThread();
+	if(!entry){
+		printk("Bug:bad entry.\n");
+		stop();
+	}
 	if(entry) exit(entry(self->argv));
 	asm("ud2");
 	//process = GetCurProcess();
@@ -993,7 +766,6 @@ LPPROCESS create_process(const wchar_t * name,void * argv){
 	{//initlize process data
 		process = kmalloc(sizeof(PROCESS),0);
 		memset(process,0,sizeof(PROCESS));
-		LockProcessField(process);
 		process->gst = GST_PROCESS;
 		process->id = xaddd(&process_count,1);
 		//process->thread_count = 0;//uesless
@@ -1013,17 +785,10 @@ LPPROCESS create_process(const wchar_t * name,void * argv){
 		memset(thread,0,sizeof(THREAD));
 		thread->gst = GST_THREAD;
 		thread->id = xaddd(&thread_count,1);
-		thread->flags = TF_STOP;
 		thread->processor = -1;
 		thread->argv = argv;
-		//thread->status_disable = 0;
-		//thread->level = 0;//useless
-		//thread->cur_level = 0;
-		//thread->busy = 0;//useless
-		thread->timer = timer_alloc(0,TMR_MOD_ONCE,NULL,NULL);
-		//thread->user_stack_p4e = 0;//useless
-		thread->stack = stack = kmalloc(4096,4096);
-		stack = stack + 4096/sizeof(u64) - 12;
+		thread->stack = stack = alloc_stack();
+		stack = stack + STACK_SIZE/sizeof(u64) - 12;
 		thread->rsp = (u64)stack;
 		thread->ker_ent_rsp = thread->rsp + 88;
 		stack[0] = 0;//argument,rcx
@@ -1036,35 +801,29 @@ LPPROCESS create_process(const wchar_t * name,void * argv){
 		stack[7] = 0;//r14
 		stack[8] = 0;//r15
 		stack[9] = thread_entry;
+		thread->father = process;
 	}
-	put_page(system_enter_page,thread,0x00007ffffffff000);
-	put_page(get_free_page(1,1),thread,USER_INIT_RSP);
+	put_page(0x1000 | PAGE_EXIST | PAGE_USER,thread,0x00007ffffffff000);
+	allocate_area(thread,0x00007f8000000000,0x0000007ffffff000,PAGE_WRITE | PAGE_USER);
 	insert_process_thread(process,thread);
-	ID();
 	insert_process(process);
 	thread->solt = find_first_empty();
 	thread_list[thread->solt] = thread;
-	UnlockProcessField(thread);
-	IE();
 	return process;
 }
 LPTHREAD create_thread(LPPROCESS process,int (*entry)(void*),void * argv){
 	LPTHREAD thread,_thread;
 	u64 * stack;
 
-	ID();
+	if(!process) process = GetCurProcess();
 	{//initlize thread status.
 		thread = kmalloc(sizeof(THREAD),0);
 		memset(thread,0,sizeof(THREAD));
 		thread->gst = GST_THREAD;
-		thread->flags = TF_STOP;
 		thread->processor = -1;
 		thread->argv = argv;
-		//thread->status_disable = 0;
-		thread->timer = timer_alloc(0,TMR_MOD_ONCE,NULL,NULL);
-		//thread->user_stack_p4e = 0;//useless
-		thread->stack = stack = kmalloc(4096,4096);
-		stack = stack + 4096/sizeof(u64) - 12;
+		thread->stack = stack = alloc_stack();
+		stack = stack + STACK_SIZE/sizeof(u64) - 12;
 		thread->rsp = (u64)stack;
 		thread->ker_ent_rsp = thread->rsp + 88;
 		stack[0] = entry;//argument,rcx
@@ -1078,25 +837,16 @@ LPTHREAD create_thread(LPPROCESS process,int (*entry)(void*),void * argv){
 		stack[8] = 0;//r15
 		stack[9] = thread_entry;
 		thread->id = xaddd(&thread_count,1);
-		//printk("thread %d stack:%P.",thread->id,stack);;
-		//thread->level = 0;//useless
-		//thread->cur_level = 0;
+		thread->father = process;
 	}
-	put_page(system_enter_page,thread,0x00007ffffffff000);
-	put_page(get_free_page(1,1),thread,USER_INIT_RSP);
-	if(!process) process = GetCurProcess();
+	put_page(0x1000 | PAGE_EXIST | PAGE_USER,thread,0x00007ffffffff000);
+	allocate_area(thread,0x00007f8000000000,0x0000007ffffff000,PAGE_WRITE | PAGE_USER);
 	insert_process_thread(process,thread);
 	thread->solt = find_first_empty();
+	//printk("create %P.",thread);
 	thread_list[thread->solt] = thread;
-	IE();
 	return thread;
 }
-
-static int shell_destory(LPTHREAD thread,LPPROCESS process){
-	process->by_shell = 0;
-	return 0;
-}
-
 int shell(const wchar_t * name,void * argv){
 	LPPROCESS process;
 	LPTHREAD thread;
@@ -1105,20 +855,12 @@ int shell(const wchar_t * name,void * argv){
 	process = create_process(name,argv);
 	process->by_shell = 1;
 	thread = GetCurThread();
-	if(cmpxchg4b(&thread->flags,TF_ACTIVE,TF_BLOCK,NULL)){
-		if(lock_bts(&thread->flags,THREAD_KILL_WHEN_WAKE_BIT)){
-			exit(-1);
-			return ret;
-		}
-		else{
-			//error
-			
-			
-		}
-	}
+	thread->flag = TF_BLOCK;
+	schedule2();
 	ret = process->ret;
 	if(process->image_name) kfree(process->image_name);
 	kfree(process);
+	if(thread->need_destory) exit(ERR_BE_DESTORY);
 	return ret;
 }
 void __attribute__((noreturn)) schedule_init_ap(int (*entry)(void*),void * argv){
@@ -1135,18 +877,13 @@ void __attribute__((noreturn)) schedule_init_ap(int (*entry)(void*),void * argv)
 			//err
 		}
 		thread->gst = GST_THREAD;
-		thread->flags = TF_ACTIVE;
+		thread->flag = TF_ACTIVE;
 		thread->processor = GetCPUId();
-		thread->timer = timer_alloc(0,TMR_MOD_ONCE,NULL,NULL);
 		thread->argv = argv;
-		//thread->user_stack_p4e = 0;//useless
 		thread->id = xaddd(&thread_count,1);
-		//thread->level = 0;//useless
-		//thread->cur_level = 0;
-		thread->stack = stack = kmalloc(4096,4096);
-		__rsp = stack = stack + 4096/sizeof(u64) - 8;
+		thread->stack = stack = alloc_stack();
+		__rsp = stack = stack + STACK_SIZE/sizeof(u64) - 8;
 		thread->ker_ent_rsp = __rsp + 56;
-		//thread->rsp = 0;
 		stack[0] = thread_entry;
 	}
 	{//search and lock process 0.
@@ -1169,13 +906,8 @@ void __attribute__((noreturn)) schedule_init_ap(int (*entry)(void*),void * argv)
 	thread->father = process;
 	SetCurProcess(process);
 	SetCurThread(thread);
-	//if(suppose_sysenter) wrmsr(IA32_SYSENTER_ESP,thread->ker_ent_rsp);
-	//write_private_dword(TSS.reg[RSPL(0)],thread->ker_ent_rsp & 0x00000000ffffffff);
-	//write_private_dword(TSS.reg[RSPH(0)],thread->ker_ent_rsp >> 32);
-	//put_page(system_enter_page,thread,SYSTEM_CALL_PROC_BASE);
-	//put_page(get_free_page(1,1),thread,USER_INIT_RSP);
-	//((u64*)PADDR2V(get_cr3()))[USER_STACK_P4E_INDEX] = thread->user_stack_p4e;
 	LockThreadStatus(thread);
+	SE();
 	thread_exit(__rsp,entry,NULL);
 }
 void __attribute__((noreturn)) schedule_init(int (*entry)(void*),void * argv){
@@ -1186,19 +918,11 @@ void __attribute__((noreturn)) schedule_init(int (*entry)(void*),void * argv){
 	
 	//enable other processor(s) to schedule
 	request_ipi(CPU_TIME_UPDATA_IPI,updata_schedule_receive);
+	request_ipi(CPU_SCHEDULE_IPI,NULL);
 	{//process 0
 		process = kmalloc(sizeof(PROCESS),0);
 		memset(process,0,sizeof(PROCESS));
-		//LockProcessField(process);//useless
 		process->gst = GST_PROCESS;
-		//process->id = 0;//useless
-		//process->thread_count = 0;//useless
-		//process->father = NULL;//useless
-		//UnlockProcessField(process);//useless
-		//LockProcessLocalList(process);//useless
-		//UnlockProcessLocalList(process);//useless
-		//LockProcessGlobalList();
-		//UnlockProcessGlobalList();
 	}
 	{//thread 0
 		thread = kmalloc(sizeof(THREAD),0);
@@ -1209,21 +933,12 @@ void __attribute__((noreturn)) schedule_init(int (*entry)(void*),void * argv){
 		}
 		thread->gst = GST_THREAD;
 		thread->father = process;
-		thread->flags = TF_ACTIVE;
+		thread->flag = TF_ACTIVE;
 		thread->argv = argv;
-		thread->timer = timer_alloc(0,TMR_MOD_ONCE,NULL,NULL);
-		thread->stack = stack = kmalloc(4096,4096);
-		__rsp = stack = stack + 4096/sizeof(u64) - 8;
+		thread->stack = stack = alloc_stack();
+		__rsp = stack = stack + STACK_SIZE/sizeof(u64) - 8;
 		thread->ker_ent_rsp = __rsp + 56;
-		//thread->id = 0;//useless
-		//thread->processor = GetCPUId();//useless
-		//thread->user_stack_p4e = 0;//useless
-		//thread->level = 0;//useless
-		//thread->cur_level = 0;
-		//thread->busy = 0;//useless
-		//thread->rsp = 0;//useless
 		stack[0] = thread_entry;
-		thread->id = xaddd(&thread_count,1);
 	}
 	thread_list[thread->solt] = thread;
 	thread_count = 1;
@@ -1233,15 +948,9 @@ void __attribute__((noreturn)) schedule_init(int (*entry)(void*),void * argv){
 	process->thread_count = 1;
 	SetCurProcess(process);
 	SetCurThread(thread);
-	//if(suppose_sysenter) wrmsr(IA32_SYSENTER_ESP,thread->ker_ent_rsp);
-	//write_private_dword(TSS.reg[RSPL(0)],thread->ker_ent_rsp & 0x00000000ffffffff);
-	//write_private_dword(TSS.reg[RSPH(0)],thread->ker_ent_rsp >> 32);
-	//put_page(system_enter_page,thread,SYSTEM_CALL_PROC_BASE);
-	//put_page(get_free_page(1,1),thread,USER_INIT_RSP);
-	//((u64*)PADDR2V(get_cr3()))[USER_STACK_P4E_INDEX] = thread->user_stack_p4e;
 	write_private_dword(cpu_time,CPU_TIME);
-	ID();
 	LockThreadStatus(thread);
+	SE();
 	thread_exit(__rsp,entry,NULL);
 }
 
