@@ -422,8 +422,8 @@ static void mutex_timer_call_back(LPTIMER timer,LPTHREAD thread){//线程等待�
 }
 int wait_mutex(struct _MUTEX_ * mutex,int time){//抢占资源
 	LPTHREAD thread;
-	LPTHREAD * prev;
-	volatile LPTHREAD next;
+	LPTHREAD * prev = NULL;
+	volatile LPTHREAD next = NULL;
 	LPTIMER timer;
 	u64 rf;
 
@@ -489,14 +489,13 @@ int wait_mutex(struct _MUTEX_ * mutex,int time){//抢占资源
 }
 int release_mutex(struct _MUTEX_ * mutex,int time){
 	LPTHREAD thread;
-	LPTHREAD * prev;
-	volatile LPTHREAD next;
+	LPTHREAD * prev = NULL;
+	volatile LPTHREAD next = NULL;
 	LPTIMER timer;
 	u64 rf;
 	
 ///	if(heckArgument()) return ERR;
 	if(!mutex) return ERR_INVAILD_PTR;
-	thread = GetCurThread();
 	SFI(rf);
 	LockMutex(mutex);
 	if(mutex->flags & MUTEX_LOCKED || mutex->release.t){
@@ -505,7 +504,7 @@ int release_mutex(struct _MUTEX_ * mutex,int time){
 			LF(rf);
 			return ERR_RESOURCE_BUSY;
 		}
-		
+		thread = GetCurThread();
 		prev = mutex->release.p;
 		thread->flag = TF_BLOCK;
 		mutex->release.p = & next;
@@ -600,15 +599,14 @@ static void semaphore_timer_call_back(LPTIMER timer,LPTHREAD thread){//线程等
 }
 int wait_semaphore(int val,struct _SEMAPHORE_ * se,int time){//抢占资源
 	LPTHREAD thread;
-	LPTHREAD * prev;
-	LPTHREAD next;
+	LPTHREAD * prev = NULL;
+	LPTHREAD next = NULL;
 	LPTIMER timer;
 	u64 rf;
 
 	if(!se) return ERR_INVAILD_PTR;//非法指针
 	if(!val) return 0;//不抢占任何资源则直接返回
 	if(val > se->max) return ERR_OUT_OF_RANGE;//抢占超过总数的资源
-	thread = GetCurThread();
 	SFI(rf);//关中断
 	LockSemaphore(se);//抢占信号量
 	if(se->wait.t || se->cur < val){//若资源不足或已有线程在等待（服从先到先服务）
@@ -617,6 +615,7 @@ int wait_semaphore(int val,struct _SEMAPHORE_ * se,int time){//抢占资源
 			LF(rf);
 			return ERR_RESOURCE_BUSY;
 		}
+		thread = GetCurThread();
 		thread->flag = TF_BLOCK;
 		prev = se->wait.p;
 		se->wait.p = &next;
@@ -674,8 +673,8 @@ int wait_semaphore(int val,struct _SEMAPHORE_ * se,int time){//抢占资源
 }
 int release_semaphore(int val,struct _SEMAPHORE_ * se,int time){
 	LPTHREAD thread;
-	LPTHREAD * prev;
-	volatile LPTHREAD next;
+	LPTHREAD * prev = NULL;
+	volatile LPTHREAD next = NULL;
 	LPTIMER timer;
 	u64 rf;
 	
@@ -690,6 +689,7 @@ int release_semaphore(int val,struct _SEMAPHORE_ * se,int time){
 			LF(rf);
 			return ERR_RESOURCE_BUSY;
 		}
+		thread = GetCurThread();
 		thread->flag = TF_BLOCK;
 		prev = se->release.p;
 		se->release.p = &next;
@@ -704,14 +704,13 @@ int release_semaphore(int val,struct _SEMAPHORE_ * se,int time){
 			timer_start(timer);
 		}
 		schedule2();
-		if(time != -1) timer_stop(timer);
+		if(time != -1) timer_free(timer);
 		if(thread->wait_state == TFW_RESOURCE_DESTORY) {//若信号量正在销毁，则返回 无效的指针
 			se->release.t = next;
 			return ERR_INVAILD_PTR;
 		}
 		SFI(rf);
 		LockSemaphore(se);
-		thread = GetCurThread();
 		if(thread->wait_state == TFW_OUT_OF_TIME) {
 			if(thread == se->release.t){
 				se->release.t = next;
