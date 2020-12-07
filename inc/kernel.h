@@ -33,6 +33,9 @@
 #define TF_BLOCK	1//block by something
 #define TF_DESTORY	2//destorying
 
+#define TFW_OUT_OF_TIME			1
+#define TFW_RESOURCE_DESTORY	2
+
 typedef struct _USER_ {
 	u32 id;
 	//MUTEX mutex;
@@ -73,6 +76,7 @@ typedef struct _THREAD_ {
 	u8 processor;//hold current processor which my control
 	u8 priority;
 	u8 need_destory;
+	u8 wait_state;
 	int cpu_time;
 	volatile int semaphore_val;
 	int solt;
@@ -100,14 +104,16 @@ LPTHREAD create_thread(LPPROCESS process,int (*entry)(void*),void*);
 
 void schedule2();
 static inline void schedule_disable(){
-	ID();
+	u64 rf;
+	SFI(rf);
 	lock_bts_private(flags,CPU_FLAGS_SCHEDULE_DISABLE);
 	write_private_dword(schedule_disable_count,read_private_dword(schedule_disable_count) + 1);
-	IE();
+	LF(rf);
 }
 static inline void schedule_enable(){
 	u32 val;
-	ID();
+	u64 rf;
+	SFI(rf);
 	val = read_private_dword(schedule_disable_count);
 	if(val){
 		val--;
@@ -117,7 +123,7 @@ static inline void schedule_enable(){
 		lock_btr_private(flags,CPU_FLAGS_SCHEDULE_DISABLE);
 		if(lock_btr_private(flags,CPU_FLAGS_NEED_SCHEDULE)) schedule2();
 	}
-	IE();
+	LF(rf);
 }
 
 #define SD()	schedule_disable()

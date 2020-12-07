@@ -94,7 +94,9 @@
 //0x00000001_00000000 - 0x000000ff_ffffffff 1020GB private dynamic library
 //0x00000100_00000000 - 0x000001ff_ffffffff 1024GB public dynamic library
 //0x00000200_00000000 - 0x000002ff_ffffffff 1024GB thread private heap
+#define TLS_BASE
 //0x00000300_00000000 - 0x000003ff_ffffffff 1024GB thread public heap
+#define VMALLOC_BASE                0x0000030000000000
 //0x00000400_00000000 - 0x00007eff_ffffffff ?? reserved
 //0x00007f00_00000000 - 0x00007fff_ffffefff 512GB - 4KB thread stack
 //0x00007fff_fffff000 - 0x00007fff_ffffffff 4KB For system and read only,mapping 0x1000
@@ -115,6 +117,14 @@
 #define MMHSB			0xffff804400000000LL
 //0xffff8048_00000000 - 0xffff804b_ffffffff 16KB * 1024 * 1024 Kernel Stack.
 //per enter is 16KB,but lower 4KB is NULL,to ensure we will know when stack overflow.
+//0xffff804c_00000000 - 0xffff807f_ffffffff ??
+//0xffff804c_00000000 - 0xffff804c_3fffffff 1GB for per process,public heap
+#define MMPHCBB         0xffff804c00000000LL
+#define MMPHCBL         0xffff804c3ffffffcLL
+//0xffff804c_40000000 - 0xffff804c_7fffffff 1GB for per thread,private heap
+#define MMTHCBB         0xffff804c40000000LL
+#define MMTHCBL         0xffff804c7ffffffcLL
+
 #ifdef SPEARATE_STACK
 #define STACK_BASE      0xffff804800000000LL
 #define STACK_SIZE      0x4000

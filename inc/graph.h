@@ -25,26 +25,14 @@
 
 #define RECT_ATTR_UNVISABLE		1
 
+typedef unsigned int RGB;
 
-struct _BMP_FONT_ {
-	struct{
-		u32 off:24;
-		u32 width:8;
-	} pos[65536];
-	void * bit_map;
-};
 
-struct _BMP_FONT_ * bit_map_font;
-int screen_high;
-int screen_width;
-int byte_per_scan_line;
-u8 * screen_lfb;
-int byte_per_pixel;
 
 typedef struct _FORM_ {
 	wchar_t * name;
-	u16 top,bottom,right,left;
-	u16 orgx,orgy;
+	int top,bottom,right,left;
+	int orgx,orgy;
 	struct _FORM_ * father;
 	//LPBRUSH brush;
 	//LPPEN pen;
@@ -53,12 +41,14 @@ typedef struct _FORM_ {
 } FORM,*LPFORM;
 
 typedef struct _RECT_ {
-	u16 top,bottom,right,left;
+	int top,bottom,right,left;
 	int attr;
 } RECT,*LPRECT;
+typedef struct _POS_ {
+	int x, y;
+} POS,*LPPOS;
 
-
-
-
+int rect_move(LPRECT,signed int dx,signed int dy);
+int rect_draw(LPRECT rect,RGB color0,RGB color1);
 
 #endif

@@ -33,7 +33,7 @@ int wsprintf(wchar_t * _buf, size_t size, const wchar_t * fmt,...);
 void putwchar(wchar_t ch);
 void wprint(const wchar_t * Str);
 void putws(const wchar_t * Str);
-int wprintf(const wchar_t * fmt,...);
+int wprintk(const wchar_t * fmt,...);
 void putchar(char ch);
 void print(const char * Str);
 void puts(const char * Str);

@@ -170,7 +170,6 @@ static struct _IRQ_HANDLE_ * irq_handle[IRQ_COUNT];
 static u8 cpu_id2lapic_id[MAX_CPU_COUNT];
 static int lock;
 static int apic_timer_time;
-static int irq_mask_count[IRQ_COUNT];
 static u8 irq_mask_busy[(IRQ_COUNT + 0x07) >> 3];
 spin_optr_def_bit(IRQList,&lock,IRQ_LIST_BUSY);
 spin_optr_def_arg_bit(IOAPIC,&lock,IOAPIC_BUSY);
@@ -187,45 +186,48 @@ static inline u32 IOAPICI(int index,int reg){
 
 int request_irq(int irq,int(*handle)(int)){
 	struct _IRQ_HANDLE_ * cur;
+	u64 rf;
 	
 	if(irq >= IRQ_COUNT) return ERR_OUT_OF_RANGE;
 	cur = kmalloc(sizeof(struct _IRQ_HANDLE_),0);
 	cur->handle = handle;
-	ID();
+	SFI(rf);
 	LockIRQList();
 	cur->next = irq_handle[irq];
 	irq_handle[irq] = cur;
 	UnlockIRQList();
-	IE();
+	LF(rf);
 	return 0;
 }
 int reject_irq(int irq,int(*handle)(int)){
 	struct _IRQ_HANDLE_ * _handle, * prev = NULL;
+	u64 rf;
 
 	if(irq >= IRQ_COUNT) return ERR_OUT_OF_RANGE;
-	ID();
+	SFI(rf);
 	LockIRQList();
 	for(_handle = irq_handle[irq];_handle;prev = _handle,_handle = _handle->next)
 		if(_handle->handle == handle){
 			if(prev) xchgq((void*)&(prev->next),(u64)(_handle->next));
 			else irq_handle[irq] = _handle->next;
 			UnlockIRQList();
-			IE();
+			LF(rf);
 			kfree(_handle);
 			return 0;
 		}
 	UnlockIRQList();
-	IE();
+	LF(rf);
 	return ERR_OUT_OF_RANGE;
 }
 int irq_routine(int irq,int lapic_id){
-	
+	u64 rf;
+
 	if(irq >= IRQ_COUNT || irq2lint[irq].index == 0xff) return ERR_OUT_OF_RANGE;
-	ID();
+	SFI(rf);
 	LockIOAPIC(irq2lint[irq].index);
 	IOAPICO(irq2lint[irq].index,IOAPIC_TABH(irq2lint[irq].lint),irq + 32);
 	UnlockIOAPIC(irq2lint[irq].index);
-	IE();
+	LF(rf);
 	return 0;
 }
 static int assign_int(u32 lint,u32 ioapic_id,u32 irq){
@@ -237,7 +239,6 @@ static int assign_int(u32 lint,u32 ioapic_id,u32 irq){
 	}
 	if(index == init_msg.IOAPICCount) return ERR_OUT_OF_RANGE;
 	if(lint >= ioapic[index].lint_count) return ERR_OUT_OF_RANGE;
-	ID();
 	LockIOAPIC(index);
 	while((tmp = IOAPICI(index,IOAPIC_TABL(lint))) & 0x00002000) nop();
 	IOAPICO(index,IOAPIC_TABL(lint),0);
@@ -250,85 +251,75 @@ static int assign_int(u32 lint,u32 ioapic_id,u32 irq){
 	}
 	IOAPICO(index,IOAPIC_TABL(lint),tmp);
 	UnlockIOAPIC(index);
-	IE();
 	return 0;
 }
 int apic_enable(){
 	u32 tmp;
 
-	ID();
 	tmp = LAPICI(LAPIC_SIVR);
 	tmp |= 0x100;
 	LAPICO(LAPIC_SIVR,tmp);
-	IE();
 }
-int apic_disable(){
-	u32 tmp;
-	
-	ID();
-	tmp = LAPICI(LAPIC_SIVR);
-	tmp &= ~0x100;
-	LAPICO(LAPIC_SIVR,tmp);
-	IE();
-}
+//static int apic_disable(){
+//	u32 tmp;
+//	
+//	tmp = LAPICI(LAPIC_SIVR);
+//	tmp &= ~0x100;
+//	LAPICO(LAPIC_SIVR,tmp);
+//}
 static void apic_eoi(){
-	ID();
 	LAPICO(LAPIC_EOI,0);
-	IE();
 }
 int irq_enable(u32 irq){
 	u32 tmp;
+	u64 rf;
 	
 	if(irq >= IRQ_COUNT) return ERR_OUT_OF_RANGE;
 	if(irq2lint[irq].index == 0xff) return ERR_OUT_OF_RANGE;
-	ID();
+	SFI(rf);
 	spin_lock_bit(irq_mask_busy,irq);
-	irq_mask_count[irq]--;
-	if(!irq_mask_count[irq]) {
-		LockIOAPIC(irq2lint[irq].index);
-		tmp = IOAPICI(irq2lint[irq].index,IOAPIC_TABL(irq2lint[irq].lint));
-		tmp &= 0xfffeffff;
-		IOAPICO(irq2lint[irq].index,IOAPIC_TABL(irq2lint[irq].lint),tmp);
-		UnlockIOAPIC(irq2lint[irq].index);
-	}
+	LockIOAPIC(irq2lint[irq].index);
+	tmp = IOAPICI(irq2lint[irq].index,IOAPIC_TABL(irq2lint[irq].lint));
+	tmp &= 0xfffeffff;
+	IOAPICO(irq2lint[irq].index,IOAPIC_TABL(irq2lint[irq].lint),tmp);
+	UnlockIOAPIC(irq2lint[irq].index);
 	spin_unlock_bit(irq_mask_busy,irq);
-	IE();
+	LF(rf);
 	return 0;
 }
 int irq_disable(u32 irq){
 	u32 tmp;
+	u64 rf;
 	
 	if(irq >= IRQ_COUNT) return ERR_OUT_OF_RANGE;
 	if(irq2lint[irq].index == 0xff) return ERR_OUT_OF_RANGE;
-	ID();
+	SFI(rf);
 	spin_lock_bit(irq_mask_busy,irq);
-	if(!irq_mask_count[irq]){
-		LockIOAPIC(irq2lint[irq].index);
-		tmp = IOAPICI(irq2lint[irq].index,IOAPIC_TABL(irq2lint[irq].lint));
-		tmp |= 0x00010000;
-		IOAPICO(irq2lint[irq].index,IOAPIC_TABL(irq2lint[irq].lint),tmp);
-		UnlockIOAPIC(irq2lint[irq].index);
-	}
-	irq_mask_count[irq]++;
+	LockIOAPIC(irq2lint[irq].index);
+	tmp = IOAPICI(irq2lint[irq].index,IOAPIC_TABL(irq2lint[irq].lint));
+	tmp |= 0x00010000;
+	IOAPICO(irq2lint[irq].index,IOAPIC_TABL(irq2lint[irq].lint),tmp);
+	UnlockIOAPIC(irq2lint[irq].index);
 	spin_unlock_bit(irq_mask_busy,irq);
-	IE();
+	LF(rf);
 	return 0;
 }
 void send_ipi(u8 ipi,u8 dest_cpu,int priority,int mode){
 	u32 tmp;
+	u64 rf;
 
 	if(priority) tmp = 0x00004000;
 	else tmp = 0x00004100;
 	tmp |= (mode & 0x03) << 18;
-	ID();
+	SFI(rf);
 	LAPICO(LAPIC_ICRH,dest_cpu << 24);
 	LAPICO(LAPIC_ICRL,(ipi + IPI_START_INT) | tmp);
-	IE();
+	LF(rf);
 }
 void ipi_arise(int ipi){
+	EOI();
 	if(ipi > IPI_COUNT) return;
 	if(ipi_handle[ipi]) ipi_handle[ipi]();
-	EOI();
 	if(GetCurThread()->need_destory) exit(ERR_BE_DESTORY);
 }
 void request_ipi(u8 ipi,int(*handle)()){
@@ -338,7 +329,7 @@ void request_ipi(u8 ipi,int(*handle)()){
 void irq_arise(int irq){
 	struct _IRQ_HANDLE_ * cur;
 	
-	ID();
+	EOI();
 	for(cur = irq_handle[irq];cur;cur = cur->next){
 		if(!cur->handle){
 			print("BUG:arch/init.c::int_vector_ent().\n");
@@ -346,13 +337,11 @@ void irq_arise(int irq){
 		}
 		cur->handle(irq);
 	}
-	EOI();
-	IE();
 }
 void lapic_init(){
 	u8 lapic_id;
 	u32 tmp;
-	ID();
+	
 	tmp = LAPICI(LAPIC_LINT0);
 	tmp &= 0xffff00ff;
 	tmp |= 0x00005700;
@@ -362,10 +351,9 @@ void lapic_init(){
 	tmp |= 0x00005400;
 	LAPICO(LAPIC_LINT1,tmp);
 	lapic_id = (LAPICI(LAPIC_ID) & LAPIC_ID_MASK) >> LAPIC_ID_SHIFT;
-	IE();
 	cpu_id2lapic_id[GetCPUId()] = lapic_id;
 }
-void ioapic_init(){
+static void ioapic_init(){
 	int index;
 	
 	for(index = 0;index < init_msg.IOAPICCount;index++){
@@ -386,74 +374,73 @@ void mp_init(){
 	u32 tmp;
 	u8 * cur;
 
-	make_gate(IRQ_START_INT + 0,__irq00,0,0,0x0f);
-	make_gate(IRQ_START_INT + 1,__irq01,0,0,0x0f);
-	make_gate(IRQ_START_INT + 2,__irq02,0,0,0x0f);
-	make_gate(IRQ_START_INT + 3,__irq03,0,0,0x0f);
-	make_gate(IRQ_START_INT + 4,__irq04,0,0,0x0f);
-	make_gate(IRQ_START_INT + 5,__irq05,0,0,0x0f);
-	make_gate(IRQ_START_INT + 6,__irq06,0,0,0x0f);
-	make_gate(IRQ_START_INT + 7,__irq07,0,0,0x0f);
-	make_gate(IRQ_START_INT + 8,__irq08,0,0,0x0f);
-	make_gate(IRQ_START_INT + 9,__irq09,0,0,0x0f);
-	make_gate(IRQ_START_INT + 10,__irq0a,0,0,0x0f);
-	make_gate(IRQ_START_INT + 11,__irq0b,0,0,0x0f);
-	make_gate(IRQ_START_INT + 12,__irq0c,0,0,0x0f);
-	make_gate(IRQ_START_INT + 13,__irq0d,0,0,0x0f);
-	make_gate(IRQ_START_INT + 14,__irq0e,0,0,0x0f);
-	make_gate(IRQ_START_INT + 15,__irq0f,0,0,0x0f);
-	make_gate(IRQ_START_INT + 16,__irq10,0,0,0x0f);
-	make_gate(IRQ_START_INT + 17,__irq11,0,0,0x0f);
-	make_gate(IRQ_START_INT + 18,__irq12,0,0,0x0f);
-	make_gate(IRQ_START_INT + 19,__irq13,0,0,0x0f);
-	make_gate(IRQ_START_INT + 20,__irq14,0,0,0x0f);
-	make_gate(IRQ_START_INT + 21,__irq15,0,0,0x0f);
-	make_gate(IRQ_START_INT + 22,__irq16,0,0,0x0f);
-	make_gate(IRQ_START_INT + 23,__irq17,0,0,0x0f);
-	make_gate(IRQ_START_INT + 24,__irq18,0,0,0x0f);
-	make_gate(IRQ_START_INT + 25,__irq19,0,0,0x0f);
-	make_gate(IRQ_START_INT + 26,__irq1a,0,0,0x0f);
-	make_gate(IRQ_START_INT + 27,__irq1b,0,0,0x0f);
-	make_gate(IRQ_START_INT + 28,__irq1c,0,0,0x0f);
-	make_gate(IRQ_START_INT + 29,__irq1d,0,0,0x0f);
-	make_gate(IRQ_START_INT + 30,__irq1e,0,0,0x0f);
-	make_gate(IRQ_START_INT + 31,__irq1f,0,0,0x0f);
-	make_gate(IRQ_START_INT + 32,__irq20,0,0,0x0f);
-	make_gate(IRQ_START_INT + 33,__irq21,0,0,0x0f);
-	make_gate(IRQ_START_INT + 34,__irq22,0,0,0x0f);
-	make_gate(IRQ_START_INT + 35,__irq23,0,0,0x0f);
-	make_gate(IRQ_START_INT + 36,__irq24,0,0,0x0f);
-	make_gate(IRQ_START_INT + 37,__irq25,0,0,0x0f);
-	make_gate(IRQ_START_INT + 38,__irq26,0,0,0x0f);
-	make_gate(IRQ_START_INT + 39,__irq27,0,0,0x0f);
-	make_gate(IRQ_START_INT + 40,__irq28,0,0,0x0f);
-	make_gate(IRQ_START_INT + 41,__irq29,0,0,0x0f);
-	make_gate(IRQ_START_INT + 42,__irq2a,0,0,0x0f);
-	make_gate(IRQ_START_INT + 43,__irq2b,0,0,0x0f);
-	make_gate(IRQ_START_INT + 44,__irq2c,0,0,0x0f);
-	make_gate(IRQ_START_INT + 45,__irq2d,0,0,0x0f);
-	make_gate(IRQ_START_INT + 46,__irq2e,0,0,0x0f);
-	make_gate(IRQ_START_INT + 47,__irq2f,0,0,0x0f);
-	make_gate(IPI_START_INT + 0,__ipi00,0,0,0x0f);
-	make_gate(IPI_START_INT + 1,__ipi01,0,0,0x0f);
-	make_gate(IPI_START_INT + 2,__ipi02,0,0,0x0f);
-	make_gate(IPI_START_INT + 3,__ipi03,0,0,0x0f);
-	make_gate(IPI_START_INT + 4,__ipi04,0,0,0x0f);
-	make_gate(IPI_START_INT + 5,__ipi05,0,0,0x0f);
-	make_gate(IPI_START_INT + 6,__ipi06,0,0,0x0f);
-	make_gate(IPI_START_INT + 7,__ipi07,0,0,0x0f);
-	make_gate(IPI_START_INT + 8,__ipi08,0,0,0x0f);
-	make_gate(IPI_START_INT + 9,__ipi09,0,0,0x0f);
-	make_gate(IPI_START_INT + 10,__ipi0a,0,0,0x0f);
-	make_gate(IPI_START_INT + 11,__ipi0b,0,0,0x0f);
-	make_gate(IPI_START_INT + 12,__ipi0c,0,0,0x0f);
-	make_gate(IPI_START_INT + 13,__ipi0d,0,0,0x0f);
-	make_gate(IPI_START_INT + 14,__ipi0e,0,0,0x0f);
-	make_gate(IPI_START_INT + 15,__ipi0f,0,0,0x0f);
+	make_gate(IRQ_START_INT + 0,__irq00,0,0,GATE_TYPE_INT);
+	make_gate(IRQ_START_INT + 1,__irq01,0,0,GATE_TYPE_INT);
+	make_gate(IRQ_START_INT + 2,__irq02,0,0,GATE_TYPE_INT);
+	make_gate(IRQ_START_INT + 3,__irq03,0,0,GATE_TYPE_INT);
+	make_gate(IRQ_START_INT + 4,__irq04,0,0,GATE_TYPE_INT);
+	make_gate(IRQ_START_INT + 5,__irq05,0,0,GATE_TYPE_INT);
+	make_gate(IRQ_START_INT + 6,__irq06,0,0,GATE_TYPE_INT);
+	make_gate(IRQ_START_INT + 7,__irq07,0,0,GATE_TYPE_INT);
+	make_gate(IRQ_START_INT + 8,__irq08,0,0,GATE_TYPE_INT);
+	make_gate(IRQ_START_INT + 9,__irq09,0,0,GATE_TYPE_INT);
+	make_gate(IRQ_START_INT + 10,__irq0a,0,0,GATE_TYPE_INT);
+	make_gate(IRQ_START_INT + 11,__irq0b,0,0,GATE_TYPE_INT);
+	make_gate(IRQ_START_INT + 12,__irq0c,0,0,GATE_TYPE_INT);
+	make_gate(IRQ_START_INT + 13,__irq0d,0,0,GATE_TYPE_INT);
+	make_gate(IRQ_START_INT + 14,__irq0e,0,0,GATE_TYPE_INT);
+	make_gate(IRQ_START_INT + 15,__irq0f,0,0,GATE_TYPE_INT);
+	make_gate(IRQ_START_INT + 16,__irq10,0,0,GATE_TYPE_INT);
+	make_gate(IRQ_START_INT + 17,__irq11,0,0,GATE_TYPE_INT);
+	make_gate(IRQ_START_INT + 18,__irq12,0,0,GATE_TYPE_INT);
+	make_gate(IRQ_START_INT + 19,__irq13,0,0,GATE_TYPE_INT);
+	make_gate(IRQ_START_INT + 20,__irq14,0,0,GATE_TYPE_INT);
+	make_gate(IRQ_START_INT + 21,__irq15,0,0,GATE_TYPE_INT);
+	make_gate(IRQ_START_INT + 22,__irq16,0,0,GATE_TYPE_INT);
+	make_gate(IRQ_START_INT + 23,__irq17,0,0,GATE_TYPE_INT);
+	make_gate(IRQ_START_INT + 24,__irq18,0,0,GATE_TYPE_INT);
+	make_gate(IRQ_START_INT + 25,__irq19,0,0,GATE_TYPE_INT);
+	make_gate(IRQ_START_INT + 26,__irq1a,0,0,GATE_TYPE_INT);
+	make_gate(IRQ_START_INT + 27,__irq1b,0,0,GATE_TYPE_INT);
+	make_gate(IRQ_START_INT + 28,__irq1c,0,0,GATE_TYPE_INT);
+	make_gate(IRQ_START_INT + 29,__irq1d,0,0,GATE_TYPE_INT);
+	make_gate(IRQ_START_INT + 30,__irq1e,0,0,GATE_TYPE_INT);
+	make_gate(IRQ_START_INT + 31,__irq1f,0,0,GATE_TYPE_INT);
+	make_gate(IRQ_START_INT + 32,__irq20,0,0,GATE_TYPE_INT);
+	make_gate(IRQ_START_INT + 33,__irq21,0,0,GATE_TYPE_INT);
+	make_gate(IRQ_START_INT + 34,__irq22,0,0,GATE_TYPE_INT);
+	make_gate(IRQ_START_INT + 35,__irq23,0,0,GATE_TYPE_INT);
+	make_gate(IRQ_START_INT + 36,__irq24,0,0,GATE_TYPE_INT);
+	make_gate(IRQ_START_INT + 37,__irq25,0,0,GATE_TYPE_INT);
+	make_gate(IRQ_START_INT + 38,__irq26,0,0,GATE_TYPE_INT);
+	make_gate(IRQ_START_INT + 39,__irq27,0,0,GATE_TYPE_INT);
+	make_gate(IRQ_START_INT + 40,__irq28,0,0,GATE_TYPE_INT);
+	make_gate(IRQ_START_INT + 41,__irq29,0,0,GATE_TYPE_INT);
+	make_gate(IRQ_START_INT + 42,__irq2a,0,0,GATE_TYPE_INT);
+	make_gate(IRQ_START_INT + 43,__irq2b,0,0,GATE_TYPE_INT);
+	make_gate(IRQ_START_INT + 44,__irq2c,0,0,GATE_TYPE_INT);
+	make_gate(IRQ_START_INT + 45,__irq2d,0,0,GATE_TYPE_INT);
+	make_gate(IRQ_START_INT + 46,__irq2e,0,0,GATE_TYPE_INT);
+	make_gate(IRQ_START_INT + 47,__irq2f,0,0,GATE_TYPE_INT);
+	make_gate(IPI_START_INT + 0,__ipi00,0,0,GATE_TYPE_INT);
+	make_gate(IPI_START_INT + 1,__ipi01,0,0,GATE_TYPE_INT);
+	make_gate(IPI_START_INT + 2,__ipi02,0,0,GATE_TYPE_INT);
+	make_gate(IPI_START_INT + 3,__ipi03,0,0,GATE_TYPE_INT);
+	make_gate(IPI_START_INT + 4,__ipi04,0,0,GATE_TYPE_INT);
+	make_gate(IPI_START_INT + 5,__ipi05,0,0,GATE_TYPE_INT);
+	make_gate(IPI_START_INT + 6,__ipi06,0,0,GATE_TYPE_INT);
+	make_gate(IPI_START_INT + 7,__ipi07,0,0,GATE_TYPE_INT);
+	make_gate(IPI_START_INT + 8,__ipi08,0,0,GATE_TYPE_INT);
+	make_gate(IPI_START_INT + 9,__ipi09,0,0,GATE_TYPE_INT);
+	make_gate(IPI_START_INT + 10,__ipi0a,0,0,GATE_TYPE_INT);
+	make_gate(IPI_START_INT + 11,__ipi0b,0,0,GATE_TYPE_INT);
+	make_gate(IPI_START_INT + 12,__ipi0c,0,0,GATE_TYPE_INT);
+	make_gate(IPI_START_INT + 13,__ipi0d,0,0,GATE_TYPE_INT);
+	make_gate(IPI_START_INT + 14,__ipi0e,0,0,GATE_TYPE_INT);
+	make_gate(IPI_START_INT + 15,__ipi0f,0,0,GATE_TYPE_INT);
 	
 	memset(irq_handle,0,sizeof(irq_handle));
 	memset(cpu_id2lapic_id,0xff,sizeof(cpu_id2lapic_id));
-	for(i = 0;i < IRQ_COUNT;i++) irq_mask_count[i] = 1;
 	memset(irq_mask_busy,0,sizeof(irq_mask_busy));
 	lock = 0;
 	ioapic_init();

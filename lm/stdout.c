@@ -43,7 +43,7 @@ void putws(const wchar_t * Str){
 	}
 	draw_char(L'\n');
 }
-int __attribute__((noinline)) wprintf(const wchar_t * fmt,...) {
+int __attribute__((noinline)) wprintk(const wchar_t * fmt,...) {
 	int ret;
 	ret = vwsprintf(PrintfBuf, 256, fmt, ((int64_t*)(&fmt)) + 1);
 	wprint(PrintfBuf);

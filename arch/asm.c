@@ -28,6 +28,7 @@ int cmpxchg16b(__m128 ptr,__m128 cval,__m128 dval,__m128 rval){
 	static int support_cmpxchg16b;
 	u64 hash;
 	int _cpuid[4];
+	u64 rf;
 	
 	if(!cmpxchg16b_init){
 		cmpxchg16b_init = 1;
@@ -64,18 +65,23 @@ int cmpxchg16b(__m128 ptr,__m128 cval,__m128 dval,__m128 rval){
 		hash ^= hash >> 8;
 		hash ^= hash >> 4;
 		hash &= 0x0000000f;
+		SFI(rf);
 		while(bts(&cmpxchg16b_lock,hash));
 		if(((u64*)ptr)[0] == ((u64*)cval)[0] &&
 			((u64*)ptr)[1] == ((u64*)cval)[1]){
 			((u64*)ptr)[0] = ((u64*)dval)[0];
 			((u64*)ptr)[1] = ((u64*)dval)[1];
+			LF(rf);
 			btr(&cmpxchg16b_lock,hash);
 			return 0;
 		}
 		else{
-			((u64*)rval)[0] = ((u64*)ptr)[0];
-			((u64*)rval)[1] = ((u64*)ptr)[1];
+			if(rval){
+				((u64*)rval)[0] = ((u64*)ptr)[0];
+				((u64*)rval)[1] = ((u64*)ptr)[1];
+			}
 			btr(&cmpxchg16b_lock,hash);
+			LF(rf);
 			return 1;
 		}
 	}

@@ -23,14 +23,9 @@
 #include <arch.h>
 #include <stddef.h>
 
-#define PIT_IRQ		0
 #define HPET0_IRQ	0
-#define KBD_IRQ		1
-#define RTC_IRQ		8
 #define MUS_IRQ		12
 #define FPU_IRQ		13
-#define SERIAL1_IRQ	4
-#define SERIAL2_IRQ	3
 
 #define IPIM_FIXED	0
 #define IPIM_SELF	1
@@ -47,22 +42,5 @@ void request_ipi(u8 ipi,int(*handle)());
 void make_gate(int vector,u64 addr,int ist,int dpl,int type);
 int set_ist(int vector,int ist,u64 rsp);
 int enable_ist(int vector);
-
-#define int_disable()	{\
-	cli();\
-	write_private_dword(int_disable_count,read_private_dword(int_disable_count) + 1);\
-}
-#define int_enable()	{\
-	u32 val;\
-	val = read_private_dword(int_disable_count);\
-	if(val){\
-		val--;\
-		write_private_dword(int_disable_count,val);\
-	}\
-	if(!val) sti();\
-}
-
-#define ID()	int_disable()
-#define IE()	int_enable()
 
 #endif

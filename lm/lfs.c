@@ -39,7 +39,7 @@ static int ReadBlock(u32 iBlock,void * pBlock,u8 Cnt){
 		return -1;
 	}
 	if(iBlock + Cnt < BlockCount) return PartRead(iBlock * 8,pBlock,Cnt * 8);
-	print("Read block out of rang.\n");
+	printk("Read block out of rang,%d.\n",iBlock);
 	return -1;
 }
 static int BlockV2R(struct _NODE_ * pNode,u32 viBlock){
@@ -173,7 +173,7 @@ struct _NODE_ * Open(const wchar_t * Name){
 	u32 NameLen;
 	u64 Pos;
 	u32 iNode;
-	
+
 	Seek(0,SEEK_SET,&Root);
 	if(Name[0] == L'/' || Name[0] == L'\\') Name++;
 	NameLen = wcslen(Name);

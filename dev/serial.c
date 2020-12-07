@@ -28,6 +28,7 @@
 #include <error.h>
 #include <spinlock.h>
 #include <stdio.h>
+#include <eisa.h>
 /*
 
 115200 Hz
@@ -118,34 +119,7 @@ reg6:Modem status
 	6:Ring Indicator
 	7:Data Carrier Detect
 reg7:scratch
-
-
 */
-
-#define SERIAL_DATA			0
-#define SERIAL_DIV_LOW		0
-#define SERIAL_IE			1
-#define SERIAL_DIV_HIGH		1
-#define SERIAL_INT_ID		2
-#define SERIAL_FIFO_CTRL	2
-#define SERIAL_LINE_CTRL	3
-#define SERIAL_MODEM_CTRL	4
-#define SERIAL_LINE_STATUS	5
-#define SERIAL_MODEM_STATUS	6
-
-#define SERIAL_WORD_LEN_5	0x00
-#define SERIAL_WORD_LEN_6	0x01
-#define SERIAL_WORD_LEN_7	0x02
-#define SERIAL_WORD_LEN_8	0x03
-#define SERIAL_STOP_LEN_1	0x00
-#define SERIAL_STOP_LEN_2	0x04
-#define SERIAL_PARITY_EN	0x08
-#define SERIAL_PARITY_ODD	0x00
-#define SERIAL_PARITY_EVEN	0x10
-#define SERIAL_PARITY_MARK	0x20
-#define SERIAL_PARITY_SPACE	0x30
-#define SERIAL_SET_BACK		0x40
-#define SERIAL_DLA			0x80
 
 #define SERIAL_FIFO_SIZE	0x800
 #define SERIAL_COM_PATH_LEN	24
@@ -166,13 +140,13 @@ struct _SERIAL_PORT_ {
 struct _SERIAL_PORT_DATA_ {
 	u16 head;
 	u16 tail;
-	SEMAPHORE semaphore;
-	u32 write_remind;
-	u8 * write_buf;
-	FCPEB fc;
 	u32 count;
+	u32 write_remind;
 	wchar_t path[SERIAL_COM_PATH_LEN];//L".dev/serial/COM%d.dev"
 	u8 read_buf[SERIAL_FIFO_SIZE];
+	SEMAPHORE semaphore;
+	u8 * write_buf;
+	FCPEB fc;
 };
 
 static struct _SERIAL_PORT_ port[4];
@@ -182,12 +156,12 @@ static int test_irq_arise(struct _SERIAL_PORT_ * _port){
 	int count;
 	
 	if(!_port->base) return -1;
-	int_id = inb(_port->base + SERIAL_INT_ID);
-	if(int_id & 0x01) return 0;
-	status = inb(_port->base + SERIAL_LINE_STATUS);
+	int_id = inb(_port->base + EISA_SERIAL_INT_ID_PORT);
+	if(int_id & EISA_SERIAL_INT_ARISE) return 0;
+	status = inb(_port->base + EISA_SERIAL_LINE_STATUS_PORT);
 	//printk("COM%d port arise interrupt,%02X.\n",_port - port + 1,int_id);
 	
-	int_id &= 0x06;
+	int_id &= EISA_SERIAL_INT_ID_MASK;
 	
 	switch(int_id){
 	case 0:
@@ -195,17 +169,17 @@ static int test_irq_arise(struct _SERIAL_PORT_ * _port){
 		//Interrupt Type:MODEM status
 		//Interrupt Source:Clear to send or data set ready or ring indicator or data carrier detect
 		//Interrupt Reset Control:Reading the MODEM status register
-		status = inb(_port->base + SERIAL_MODEM_STATUS);
+		status = inb(_port->base + EISA_SERIAL_MODE_STATUS_PORT);
 		//printk("status:%02X.\n",status);
 		break;
 	case 2:
 		//Third
 		//Transmitter Hilding register empty
 		//Transmitter holding register empty
-		//Reading thr IRR Register(if source of interrupt) or writing int the transmitter holding register
-		if(_port->ie & 0x01) {
+		//Reading the IRR Register(if source of interrupt) or writing int the transmitter holding register
+		if(_port->ie & EISA_SERIAL_RECIVE_DATA) {
 			if(_port->data->write_buf){
-				outb(_port->base + SERIAL_DATA,*_port->data->write_buf);
+				outb(_port->base + EISA_SERIAL_DATA_PORT,*_port->data->write_buf);
 				_port->data->write_buf++;
 				_port->data->write_remind--;
 				if(!_port->data->write_remind) _port->data->write_buf = NULL;
@@ -222,21 +196,21 @@ static int test_irq_arise(struct _SERIAL_PORT_ * _port){
 		if(_port->flags & PORT_BUSY){//discard data if serial isn't open or buffer overflow.
 			count = 0;
 			do{
-				_port->data->read_buf[_port->data->tail] = inb(_port->base + SERIAL_DATA);
+				_port->data->read_buf[_port->data->tail] = inb(_port->base + EISA_SERIAL_DATA_PORT);
 				_port->data->tail++;
 				_port->data->tail %= SERIAL_FIFO_SIZE;
 				count++;
 				if(xaddd(&(_port->data->count),1) >= SERIAL_FIFO_SIZE) {
-					do inb(_port->base + SERIAL_DATA);
-					while(inb(_port->base + SERIAL_LINE_STATUS) & 1);
+					do inb(_port->base + EISA_SERIAL_DATA_PORT);
+					while(inb(_port->base + EISA_SERIAL_LINE_STATUS_PORT) & 1);
 					break;
 				}
-			} while(inb(_port->base + SERIAL_LINE_STATUS) & 1);
+			} while(inb(_port->base + EISA_SERIAL_LINE_STATUS_PORT) & 1);
 			release_semaphore(count,&(_port->data->semaphore),0);
 		}
 		else {
-			do inb(_port->base + SERIAL_DATA);
-			while(inb(_port->base + SERIAL_LINE_STATUS) & 1);
+			do inb(_port->base + EISA_SERIAL_DATA_PORT);
+			while(inb(_port->base + EISA_SERIAL_LINE_STATUS_PORT) & 1);
 		}
 		break;
 	case 6:
@@ -244,14 +218,14 @@ static int test_irq_arise(struct _SERIAL_PORT_ * _port){
 		//Reciver Line Status
 		//Overrun error or patity error or framing error or break interrupt
 		//Reading the line status register
-		status = inb(_port->base + SERIAL_LINE_STATUS);
+		status = inb(_port->base + EISA_SERIAL_LINE_STATUS_PORT);
 		//printk("status:%02X.\n",status);
 		break;
 	}
 	return 0;
 }
 static int serial_handle(int IRQ){
-	if(IRQ == SERIAL1_IRQ){
+	if(IRQ == EISA_SERIAL1_IRQ){
 		test_irq_arise(port);
 		test_irq_arise(port + 2);
 	}
@@ -269,7 +243,8 @@ static int serial_read(LPSTREAM file,size_t count,void * buf){
 	_port = file->fc->data;
 	while(count >= SERIAL_FIFO_SIZE){
 		count -= SERIAL_FIFO_SIZE/2;
-		if(wait_semaphore(SERIAL_FIFO_SIZE/2,&(_port->data->semaphore),SERIAL_COM_WAIT_TIME + 16 * SERIAL_FIFO_SIZE)) return -1;
+		if(wait_semaphore(SERIAL_FIFO_SIZE/2,&(_port->data->semaphore),SERIAL_COM_WAIT_TIME + 16 * SERIAL_FIFO_SIZE)) 
+			return ERR_OUT_OF_TIME;
 		read_buf = _port->data->read_buf + _port->data->head;
 		buf_size = SERIAL_FIFO_SIZE - _port->data->head;
 		if(buf_size < SERIAL_FIFO_SIZE/2){
@@ -287,7 +262,7 @@ static int serial_read(LPSTREAM file,size_t count,void * buf){
 		}
 		xaddd(&(_port->data->count),SERIAL_FIFO_SIZE/2);
 	}
-	if(wait_semaphore(count,&(_port->data->semaphore),SERIAL_COM_WAIT_TIME + 32 * count)) return -1;
+	if(wait_semaphore(count,&(_port->data->semaphore),SERIAL_COM_WAIT_TIME + 32 * count)) return ERR_OUT_OF_TIME;
 	read_buf = _port->data->read_buf + _port->data->head;
 	buf_size = SERIAL_FIFO_SIZE - _port->data->head;
 	if(buf_size > count){
@@ -307,28 +282,30 @@ static int serial_read(LPSTREAM file,size_t count,void * buf){
 }
 static int serial_write(LPSTREAM file,size_t count,void * buf){
 	struct _SERIAL_PORT_ * _port;
+	u64 rf;
 	
 	_port = file->fc->data;
-	ID();
+	SFI(rf);
 	if(spin_try_lock_bit(&(_port->flags),PORT_SENDING_BIT)) {
-		IE();
+		LF(rf);
 		return ERR_RESOURCE_BUSY;
 	}
-	outb(_port->base + SERIAL_DATA,*(u8*)buf);
+	outb(_port->base + EISA_SERIAL_DATA_PORT,*(u8*)buf);
 	count--;
 	if(count){
 		_port->data->write_buf = ((u8*)buf) + 1;
 		_port->data->write_remind = count;
 	}
-	IE();
+	LF(rf);
 	return 0;
 }
 static LPSTREAM open_serial(wchar_t * name,u64 mode,struct _FCPEB_ * fc){
 	struct _SERIAL_PORT_ * _port;
 	LPSTREAM file;
 	LPPROCESS process;
+	u64 rf;
 	
-	ID();
+	SFI(rf);
 	_port = fc->data;
 	if(_port->flags & PORT_BUSY) return NULL;
 	_port->flags = PORT_BUSY;
@@ -340,7 +317,7 @@ static LPSTREAM open_serial(wchar_t * name,u64 mode,struct _FCPEB_ * fc){
 	file->write_pos = 0;
 	file->data = NULL;
 	file->fc = fc;
-	IE();
+	LF(rf);
 	return file;
 }
 static int close_serial(LPSTREAM file){
@@ -364,16 +341,17 @@ static int serial_get(LPSTREAM file){
 }
 static int serial_put(LPSTREAM file,int element){
 	struct _SERIAL_PORT_ * _port;
+	u64 rf;
 	
 	_port = file->fc->data;
-	ID();
+	SFI(rf);
 	if(spin_try_lock_bit(&(_port->flags),PORT_SENDING_BIT)) {
-		IE();
+		LF(rf);
 		return ERR_RESOURCE_BUSY;
 	}
 	_port->flags |= PORT_SENDING;
-	outb(_port->base + SERIAL_DATA,element);
-	IE();
+	outb(_port->base + EISA_SERIAL_DATA_PORT,element);
+	LF(rf);
 	return 0;
 }
 static int serial_fresh(LPSTREAM file){
@@ -416,18 +394,18 @@ void serial_init(){
 	port[2].base = *(u16*)ADDRP2V(0x404);
 	port[3].base = *(u16*)ADDRP2V(0x406);
 	
-	request_irq(SERIAL1_IRQ,serial_handle);
-	request_irq(SERIAL2_IRQ,serial_handle);
+	request_irq(EISA_SERIAL1_IRQ,serial_handle);
+	request_irq(EISA_SERIAL2_IRQ,serial_handle);
 	
 	for(i = 0;i < 4;i++){
 		if(!port[i].base) continue;
-		outb(port[i].base + SERIAL_IE,0x00);
-		outb(port[i].base + SERIAL_LINE_CTRL,SERIAL_DLA);
-		outb(port[i].base + SERIAL_DIV_LOW,0x01);
-		outb(port[i].base + SERIAL_DIV_HIGH,0x00);
-		outb(port[i].base + SERIAL_LINE_CTRL,SERIAL_WORD_LEN_8 | SERIAL_STOP_LEN_1);
-		outb(port[i].base + SERIAL_FIFO_CTRL,0xc7);
-		outb(port[i].base + SERIAL_IE,0x0f);
+		outb(port[i].base + EISA_SERIAL_IE_PORT,0x00);
+		outb(port[i].base + EISA_SERIAL_LINE_CTRL_PORT,EISA_SERIAL_DLA);
+		outb(port[i].base + EISA_SERIAL_DIV_LOW_PORT,0x01);
+		outb(port[i].base + EISA_SERIAL_DIV_HIG_PORT,0x00);
+		outb(port[i].base + EISA_SERIAL_LINE_CTRL_PORT,EISA_SERIAL_WORD_LEN_8 | EISA_SERIAL_STOP_LEN_1);
+		outb(port[i].base + EISA_SERIAL_FIFO_CTRL_PORT,0xc7);
+		outb(port[i].base + EISA_SERIAL_IE_PORT,0x0f);
 		port[i].ie = 0x0f;
 		port[i].flags = 0;
 		port[i].data = kmalloc(sizeof(struct _SERIAL_PORT_DATA_),0);
@@ -440,6 +418,6 @@ void serial_init(){
 		wsprintf(port[i].data->path,SERIAL_COM_PATH_LEN,L".dev/serial/COM%d.dev",i + 1);
 		fs_map(port[i].data->path,&(port[i].data->fc));
 	}
-	irq_enable(SERIAL1_IRQ);
-	irq_enable(SERIAL2_IRQ);
+	irq_enable(EISA_SERIAL1_IRQ);
+	irq_enable(EISA_SERIAL2_IRQ);
 }

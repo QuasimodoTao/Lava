@@ -26,6 +26,7 @@
 #include <mm.h>
 #include <int.h>
 #include <kernel.h>
+#include <graph.h>
 
 const u8 tofu[] = {
 	0xff,0xff,0xc3,0xc3,0xa5,0xa5,0x99,0x99,0x99,0x99,0xa5,0xa5,0xc3,0xc3,0xff,0xff
@@ -135,22 +136,126 @@ struct _MODEL_STATUS_ {
 	int y;
 };
 
+int high = 768;
+int width = 1024;
+int byte_per_scan_line = 1024 * 3;
+u8 * lfb = (void*)(0xe0000000LL | PMEMSTART);
+int byte_per_pixel = 3;
 
-static int high;
-static int width;
-static int byte_per_scan_line;
-static u8 * lfb;
 static int text_color = 0x00000000;
 static int back_color = 0xffffffff;
-static int byte_per_pixel;
+//static int model_width;
+//static int model_high;
+//static int border_width = 1;
+//static int model_per_line;
+//static struct _MODEL_STATUS_ * status;
+//static int max_cpuid;
+//static int init = 0;
+static int x = 0;
+static int y = 0;
+static unsigned char red_pos;
+static unsigned char green_pos;
+static unsigned char blue_pos;
+static unsigned char red_mask;
+static unsigned char green_mask;
+static unsigned char blue_mask;
+static uint32_t * font = NULL;
+static uint32_t (*make_rgb)(int R,int G,int B);
 
-static int model_width;
-static int model_high;
-static int border_width = 1;
-static int model_per_line;
-static struct _MODEL_STATUS_ * status;
-static int max_cpuid;
-static int init = 0;
+#define make_rgb_(rp,rm,gp,gm,bp,bm)	\
+static uint32_t make_rgb_##rp##rm##gp##gm##bp##bm(int R,int G,int B){\
+	return ((R & (0xff << rm)) << (rp - 8 + rm)) | \
+		((G & (0xff << gm)) << (gp - 8 + gm)) | \
+		((B & (0xff << bm)) << (bp - 8 + bm));\
+}
+
+make_rgb_(0,8,8,8,16,8);
+make_rgb_(0,5,5,5,10,5);
+make_rgb_(0,5,5,6,11,5);
+
+int rect_move(LPRECT rect,int dx,int dy){
+	int top,bottom,right,left;
+	int i,x_cnt,y_cnt;
+
+	top = rect->top;
+	bottom = rect->bottom;
+	right = rect->right;
+	left = rect->left;
+
+	printk("%d,%d,%d,%d,%d,%d,%d,%d.\n",top,bottom,right,left,dx,dy,high,width);
+
+	if(top > bottom) {
+		i = top;
+		top = bottom;
+		top = i;
+	}
+	if(left > right){
+		i = left;
+		left = right;
+		right = i;
+	}
+	if(top < 0) top = 0;
+	if(bottom >= high) bottom = high - 1;
+	if(left < 0) left = 0;
+	if(right >= width) right = width - 1;
+	if(dy >= 0 && bottom + dy >= high) bottom = high - dy - 1;
+	else if(top + dy < 0) top = -dy;
+	if(dx >= 0 && right + dx >= width) right = width - dx - 1;
+	else if(top + dy < 0) top = -dy;
+	x_cnt = right - left + 1;
+	y_cnt = bottom - top + 1;
+	if(dy >= 0){//move down,last to first
+		for(i = y_cnt;i >= 0;i--){
+			memcpy(lfb + (i + top + dy) * byte_per_scan_line + (left + dx) * byte_per_pixel,
+				lfb + (i + top) * byte_per_scan_line + (left) * byte_per_pixel,
+				x_cnt * byte_per_pixel);
+		}
+	}
+	else{//move up,first to last
+		for(i = 0;i <= y_cnt;i++){
+			memcpy(lfb + (i + top + dy) * byte_per_scan_line + (left + dx) * byte_per_pixel,
+				lfb + (i + top) * byte_per_scan_line + (left) * byte_per_pixel,
+				x_cnt * byte_per_pixel);
+		}
+	}
+	return 0;
+}
+int rect_put(LPRECT rect,const RGB * bmp){
+	int top = rect->top;
+	int bottom = rect->bottom;
+	int right = rect->right;
+	int left = rect->left;
+	int bmp_width = right - left + 1;
+	int bmp_high = bottom - top + 1;
+	int start_x = 0;
+	int start_y = 0;
+	int end_x = 0;
+	int end_y = 0;
+	int i,j;
+	RGB color;
+	struct {
+		unsigned char A,R,G,B;
+	} * _bmp;
+
+	if(top < 0) start_y = -top;
+	if(bottom >= high) end_y = high - bottom - 1;
+	if(left < 0) start_x = - left;
+	if(right >= width) end_x = width - right - 1;
+	_bmp = (void*)bmp;
+
+	for(i = 0;i < bmp_high;i++,top++){
+		if(top < 0) continue;
+		if(top >= high) break;
+		for(j = left;j <= right;j++){
+			
+		}
+		color = make_rgb(_bmp->R,_bmp->G,_bmp->B);
+		
+
+	}
+	
+
+}
 
 void draw_char(int ch){
 	int cpuid;
@@ -159,62 +264,52 @@ void draw_char(int ch){
 	int color;
 	int pos;
 	int i;
-	
-	if(!init) return;
-	SD();
-	cpuid = GetCPUId();
-	if(cpuid > max_cpuid) {
-		asm("cli\n\thlt"::"a"(cpuid));
-		
-		
-	}
+	int tmp;
+	int chr_width = 8;
 	
 	if(ch == '\n'){
-		status[cpuid].x = 0;
-		status[cpuid].y += 16;
+		x = 0;
+		y += 16;
 	}
 	else if(ch == '\t'){
-		status[cpuid].x += 0x3f;
-		status[cpuid].x &= 0xffffc0;
+		x += 0x3f;
+		x &= 0xffffc0;
 	}
 	else if(ch == '\r'){
-		status[cpuid].x = 0;
-		SE();
+		x = 0;
 		return;
 	}
-	if(status[cpuid].x + 8 > model_width) {
-		status[cpuid].x = 0;
-		status[cpuid].y += 16;
+	if(x + 8 > width){
+		x = 0;
+		y += 16;
 	}
-	if(status[cpuid].y >= model_high){
-		for(i = 0;i < status[cpuid].y - 16;i++){
-			memcpy(lfb + status[cpuid].posx * byte_per_pixel + (status[cpuid].posy + i) * byte_per_scan_line,
-				lfb + status[cpuid].posx * byte_per_pixel + (status[cpuid].posy + i + 16) * byte_per_scan_line,
-				model_width * byte_per_pixel);
-		}
-		for(i = 1;i <= 16;i++){
-			memset(lfb + status[cpuid].posx * byte_per_pixel + (status[cpuid].posy + model_high - i) * byte_per_scan_line,
-				0xff,model_width * byte_per_pixel);
-		}
-		status[cpuid].y -= 16;
-		///for(i = 0;i < model_high;i++){
-		///	memset(lfb + status[cpuid].posx * byte_per_pixel + (status[cpuid].posy + i) * byte_per_scan_line,
-		///		0xff,model_width * byte_per_pixel);
-		///	
-		///}
-		///status[cpuid].y = 0;
+	if(y >= high){
+		memcpy(lfb,lfb + 16 * byte_per_scan_line,(high - 16) * byte_per_scan_line);
+		memset(lfb + (high - 16) * byte_per_scan_line,0xff,16 * byte_per_scan_line);
+		y -= 16;
 	}
 	if(ch == '\n' || ch == '\t') {
-		SE();
 		return;
 	}
-	if(ch <= 0x1f || ch >= 0x7f) map = tofu;
-	else map = _bmp + 16 * (ch - 0x20);
+	if(!font){
+		if(ch <= 0x1f || ch >= 0x7f) map = tofu;
+		else map = _bmp + 16 * (ch - 0x20);
+	}
+	else{
+		tmp = font[ch];
+		if(!tmp) {
+			map = tofu;
+		}
+		else{
+			chr_width = tmp >> 24;
+			map = (void*)(((u64)font) + (tmp & 0x00ffffff));
+		}
+	}
 	for(dy = 0;dy < 16;dy++){
-		for(dx = 0;dx < 8;dx++){
-			if(bt(map,dy * 8 + dx)) color = text_color;
+		for(dx = 0;dx < chr_width;dx++){
+			if(bt(map,dy * chr_width + dx)) color = text_color;
 			else color = back_color;
-			pos = (status[cpuid].posx + status[cpuid].x + dx) * byte_per_pixel + (status[cpuid].posy + status[cpuid].y + dy) * byte_per_scan_line;
+			pos = (x + dx) * byte_per_pixel + (y + dy) * byte_per_scan_line;
 			if(byte_per_pixel == 1)
 				lfb[pos] = color;
 			else if(byte_per_pixel == 2)
@@ -228,8 +323,7 @@ void draw_char(int ch){
 			}
 		}
 	}
-	status[cpuid].x += 8;
-	SE();
+	x += chr_width;
 }
 void gui_init(){
 	struct VESA_MODE * cur_mode_info;
@@ -247,8 +341,11 @@ void gui_init(){
 	byte_per_scan_line = cur_mode_info->byte_per_scan_line;
 	lfb = ADDRP2V(cur_mode_info->lfb);
 	page_uncacheable(NULL,lfb,info->mem_size * 65536);
-	memset(lfb,0xff,high * byte_per_scan_line);
-	max_cpuid = init_msg.CPUCount - 1;
+	if(!x && !y) memset(lfb,0xff,high * byte_per_scan_line);
+
+	if(init_msg.FontBase) font = ADDRP2V(init_msg.FontBase);
+
+	//max_cpuid = init_msg.CPUCount - 1;
 	if(init_msg.CPUCount <= 1*1) a = 1;
 	else if(init_msg.CPUCount <= 2*2) a = 2;
 	else if(init_msg.CPUCount <= 3*3) a = 3;
@@ -262,38 +359,50 @@ void gui_init(){
 	
 	if(a * (a - 1) >= init_msg.CPUCount) b = a - 1;
 	else b = a;
-	model_width = width / a;
-	model_width -= border_width * 2;
-	model_high = high / b;
-	model_high -= border_width * 2;
-	model_width &= ~0x07;
-	model_high &= ~0x0f;
-	model_per_line = a;
-	status = kmalloc(sizeof(struct _MODEL_STATUS_) * init_msg.CPUCount,0);
-	
-	for(cpuid = 0;cpuid < init_msg.CPUCount;cpuid++){
-		posx = (cpuid % a) * (2 * border_width + model_width);
-		posy = (cpuid / a) * (2 * border_width + model_high);
-		status[cpuid].posx = posx + border_width;
-		status[cpuid].posy = posy + border_width;
-		status[cpuid].x = status[cpuid].y = 0;
-		for(pix = 0;pix < border_width;pix++){
-			memset(lfb + posx * byte_per_pixel + posy * byte_per_scan_line,
-				0x00,(model_width + border_width * 2) * byte_per_pixel);
-		}
-		for(i = 0;i < model_high;i++){
-			memset(lfb + posx * byte_per_pixel + (posy + i + border_width) * byte_per_scan_line,
-				0x00,border_width * byte_per_pixel);
-			memset(lfb + (posx + model_width + border_width) * byte_per_pixel + (posy + i + border_width) * byte_per_scan_line,
-				0x00,border_width * byte_per_pixel);
-		}
-		for(pix = 0;pix < border_width;pix++){
-			memset(lfb + posx * byte_per_pixel + (posy + model_high + border_width) * byte_per_scan_line,
-				0x00,(model_width + border_width * 2) * byte_per_pixel);
-		}
-		
+	//model_width = width / a;
+	//model_width -= border_width * 2;
+	//model_high = high / b;
+	//model_high -= border_width * 2;
+	//model_width &= ~0x07;
+	//model_high &= ~0x0f;
+	//model_per_line = a;
+
+	if(info->version > 0x0102){
+		red_pos = cur_mode_info->red_pos;
+		green_pos = cur_mode_info->green_pos;
+		blue_pos = cur_mode_info->blue_pos;
+		red_mask = cur_mode_info->red_mask_size;
+		green_mask = cur_mode_info->grees_mask_size;
+		blue_mask = cur_mode_info->blue_mask_size;
 	}
-	init = 1;
-	printk("%dX%d.\n",model_width,model_high);
+	make_rgb = make_rgb_0888168;
+
+
+	//status = kmalloc(sizeof(struct _MODEL_STATUS_) * init_msg.CPUCount,0);
+	
+	//for(cpuid = 0;cpuid < init_msg.CPUCount;cpuid++){
+	//	posx = (cpuid % a) * (2 * border_width + model_width);
+	//	posy = (cpuid / a) * (2 * border_width + model_high);
+	//	status[cpuid].posx = posx + border_width;
+	//	status[cpuid].posy = posy + border_width;
+	//	status[cpuid].x = status[cpuid].y = 0;
+	//	for(pix = 0;pix < border_width;pix++){
+	//		memset(lfb + posx * byte_per_pixel + posy * byte_per_scan_line,
+	//			0x00,(model_width + border_width * 2) * byte_per_pixel);
+	//	}
+	//	for(i = 0;i < model_high;i++){
+	//		memset(lfb + posx * byte_per_pixel + (posy + i + border_width) * byte_per_scan_line,
+	//			0x00,border_width * byte_per_pixel);
+	//		memset(lfb + (posx + model_width + border_width) * byte_per_pixel + (posy + i + border_width) * byte_per_scan_line,
+	//			0x00,border_width * byte_per_pixel);
+	//	}
+	//	for(pix = 0;pix < border_width;pix++){
+	//		memset(lfb + posx * byte_per_pixel + (posy + model_high + border_width) * byte_per_scan_line,
+	//			0x00,(model_width + border_width * 2) * byte_per_pixel);
+	//	}
+	//	
+	//}
+	//init = 1;
+	//printk("%dX%d.\n",1,2);
 }
 

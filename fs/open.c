@@ -75,14 +75,12 @@ static LPSTREAM root_open(wchar_t * name,u64 mode,FS_PATH * cur_path){
 	path = name;
 	SD();Lock();
 	while(1){
-			
 		name = path;
 		tpath = wcschr(path,L'\\');
 		if(!tpath) break;
 		name_len = tpath - path;
 		first = cur;
 		path = tpath + 1;
-		//printk("L0,%P,%P,%d.\n",root,name,name_len);
 		while(1){
 			if(cur->min.len == name_len && !wcsncmp(DirName(cur),name,name_len)){
 				if(cur->min.type == FS_MAP_FS) {
@@ -97,7 +95,7 @@ static LPSTREAM root_open(wchar_t * name,u64 mode,FS_PATH * cur_path){
 				}
 				else break;
 			}
-			if(cur->next == first){ Unlock(); return NULL; }
+			if(cur->next == first){ Unlock(); SE();return NULL; }
 			cur = cur->next;
 		}
 		cur = cur->son;
@@ -395,7 +393,7 @@ int fs_map(const wchar_t * _path,void * xc){
 	ent->next = first;
 	cur->next = ent;
 	Unlock(); SE();
-	wprintf(L"FS map:\\%s\n",path_heap[0] == L'\\' ? path_heap + 1 : path_heap);
+	wprintk(L"FS map:\\%s\n",path_heap[0] == L'\\' ? path_heap + 1 : path_heap);
 	kfree(path_heap);
 	return 0;
 }
@@ -510,7 +508,7 @@ LPSTREAM open(const wchar_t * _name,u64 mode){
 		}
 		else stream = GetCurProcess()->cur_path.pc->open0(path_heap,mode,&(GetCurProcess()->cur_path));
 	}
-	else stream = root_open(path_heap,mode,&root_path);
+	else stream = root_open(path_heap + 1,mode,&root_path);
 	kfree(path_heap);
 	if(stream){
 		stream->prev = NULL;

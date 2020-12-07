@@ -27,20 +27,23 @@
 #include <stdio.h>
 #include <string.h>
 
-#define ATA_TYPE_AHCI		0
-#define ATA_TYPE_IDE		1
+#define ATA_TYPE_AHCI		1
+#define ATA_TYPE_IDE		2
 #define CMD_DIRECT_READ		0
 #define CMD_DIRECT_WRITE	1
 
 struct _ATA_ {
-	u32 type;
-	u16 ata_number;//identity path
-	u16 port;
+	u8 type;
+	u8 ata_number;//identity path
+	u8 port;
+	struct _DISK_CMD_ cmd;
 	s64 sectors;
 	struct _ATA_ * next;
+	wchar_t path[32];//L"/.dev/ata%d.dev"
+	FCPEB fc;
 	union{
 		struct _ATA_AHCI_ {
-			int solts;
+			u8 solts;
 			struct _HBA_ * hba;
 			struct _AHCI_PORT_ * h_port;
 			struct _AHCI_ * ahci;
@@ -55,9 +58,6 @@ struct _ATA_ {
 			u16 ident[256];
 		} leg;
 	};
-	struct _DISK_CMD_ cmd;
-	wchar_t path[32];//L"/.dev/ata%d.dev"
-	FCPEB fc;
 };
 struct _ATA_CMD_ {
 	u64 lba;
@@ -69,7 +69,7 @@ struct _ATA_CMD_ {
 };
 
 static struct _ATA_ * ata_list = NULL;
-static int ata_counter = 0;
+static volatile int ata_counter = 0;
 static int busy = 0;
 
 static int ata_on_ahci_do_cmd(struct _ATA_ * ata,struct _ATA_CMD_ * cmd){
@@ -230,26 +230,19 @@ void * ata_on_ahci_open(struct _AHCI_ * ahci,int port){
 	
 	{//ata struct init
 		ata = kmalloc(sizeof(struct _ATA_),0);
-		spin_lock_bit(&busy,0);
-		ata->next = ata_list;
-		ata_list = ata;
-		spin_unlock_bit(&busy,0);
-		ata->ata_number = xaddd(&ata_counter,1);
+		ata->next = xchgq(&ata_list,ata);
+		ata->ata_number = (unsigned short)xaddd(&ata_counter,1);
 		ata->port = port;
 		ata->type = ATA_TYPE_AHCI;
-		ata->ahci.h_port = (void*)&(ahci->hba->port[i]);
+		ata->ahci.h_port = (void*)&(ahci->hba->port[port]);
 		ata->ahci.hba = (void*)ahci->hba;
 		ata->ahci.ahci = ahci;
 	}
 	{//ahci port init
 		_cmd = PADDR2V(get_free_page(0,0,ata->ahci.hba->cap & HBA_CAP_S64A ? 0 : 32));
-		for(i = 0;i < 16;i++){
-			ata->ahci.cmd[i] = _cmd + i;
-		}
+		for(i = 0;i < 16;i++) ata->ahci.cmd[i] = _cmd + i;
 		_cmd = PADDR2V(get_free_page(0,0,ata->ahci.hba->cap & HBA_CAP_S64A ? 0 : 32));
-		for(i = 0;i < 16;i++){
-			ata->ahci.cmd[i + 16] = _cmd + i;
-		}
+		for(i = 0;i < 16;i++) ata->ahci.cmd[i + 16] = _cmd + i;
 		ata->ahci.solt = PADDR2V(get_free_page(0,0,ata->ahci.hba->cap & HBA_CAP_S64A ? 0 : 32));
 		ata->ahci.fis = (void*)(((u64)ata->ahci.solt) + sizeof(struct _AHCI_SOLT_));
 		ata->ahci.ident = (void*)(((u64)ata->ahci.fis) + sizeof(struct _AHCI_FIS_));
@@ -266,13 +259,13 @@ void * ata_on_ahci_open(struct _AHCI_ * ahci,int port){
 		for(i = 0;i < 16;i++){
 			solt.ctba = addr;
 			addr += sizeof(struct _AHCI_CMD_);
-			memcpy(&(ata->ahci.solt[i]),&solt,sizeof(solt));
+			memcpy(&(ata->ahci.solt->solt[i]),&solt,sizeof(solt));
 		}
 		addr = ADDRV2P(NULL,ata->ahci.cmd[16]);
 		for(;i < 32;i++){
 			solt.ctba = addr;
 			addr += sizeof(struct _AHCI_CMD_);
-			memcpy(&(ata->ahci.solt[i]),&solt,sizeof(solt));
+			memcpy(&(ata->ahci.solt->solt[i]),&solt,sizeof(solt));
 		}
 	}
 	ata->ahci.solts = ((ahci->hba->cap & HBA_CAP_NCS) >> 8) + 1; 
@@ -304,20 +297,14 @@ void * ata_on_ahci_open(struct _AHCI_ * ahci,int port){
 		}
 	}
 	ata->sectors = ((u64)ata->ahci.ident[100]) + (((u64)ata->ahci.ident[101]) << 16) + (((u64)ata->ahci.ident[102]) << 32);
-	printk("ATA %d on AHCI %d total %lld sectors.\n",ata->ata_number,ata->port,ata->sectors);
-	for(i = 0;i < 10;i++){
-		printk("%c%c",ata->ahci.ident[10 + i] >> 8,ata->ahci.ident[10+i]);
-	}
-	printk(".\n");
-	for(i = 0;i < 4;i++){
-		printk("%c%c",ata->ahci.ident[23 + i] >> 8,ata->ahci.ident[23+i]);
-	}
-	printk(".\n");
-	for(i = 0;i < 20;i++){
-		printk("%c%c",ata->ahci.ident[27 + i] >> 8,ata->ahci.ident[27+i]);
-	}
-	printk(".\n");
-	printk("%P.\n",ata->ahci.ident);
+	if(ata->sectors < 2 * 1024)
+		printk("ATA %d on AHCI %d total %lld KiB.\n",ata->ata_number,ata->port,ata->sectors/2);
+	else if(ata->sectors < 2 * 1024 * 1024)
+		printk("ATA %d on AHCI %d total %lld MiB.\n",ata->ata_number,ata->port,ata->sectors/2048);
+	else if(ata->sectors < 2LL * 1024 * 1024 * 1024)
+		printk("ATA %d on AHCI %d total %lld GiB.\n",ata->ata_number,ata->port,ata->sectors/(2048*1024));
+	else
+		printk("ATA %d on AHCI %d total %lld TiB.\n",ata->ata_number,ata->port,ata->sectors/(2048*1024*1024));
 	return ata;
 }
 int ata_on_ahci_int_handle(struct _AHCI_ * ahci,void * ata){

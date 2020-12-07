@@ -39,7 +39,6 @@ void private_data_init(){
 	private_data->TSS.IO_map_base = offsetof(struct _TSS_64_,IO_map);
 	private_data->TSS.IO_map[0] = private_data->TSS.IO_map[1] = 0xffffffff;
 	selector = put_TSS(&(private_data->TSS));
-	private_data->int_disable_count = 1;
 	private_data->schedule_disable_count = 1;
 	ltr(selector);
 }

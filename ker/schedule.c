@@ -92,7 +92,9 @@ static int find_first_empty(){
 
 //将进程从进程链表中移出
 void remove_process(LPPROCESS process){
-	ID();
+	u64 rf;
+	
+	SFI(rf);
 	LockProcessGlobalList();//D0
 	process_count--;
 	if(process_list == process) process_list = process->next;
@@ -115,12 +117,13 @@ void remove_process(LPPROCESS process){
 		UnlockProcessLocalList(process->next);//E3
 		UnlockProcessLocalList(process);//E2
 	}
-	IE();
+	LF(rf);
 }
 //将进程插入到链表中
 void insert_process(LPPROCESS process){
 	LPPROCESS _process;
-	ID();
+	u64 rf;
+	SFI(rf);
 	LockProcessGlobalList();
 	process_count++;
 	if(process_count == 1){
@@ -154,11 +157,12 @@ void insert_process(LPPROCESS process){
 			UnlockProcessLocalList(process);
 		}
 	}
-	IE();
+	LF(rf);
 }
 //将线程从进程的线程链表中移出
 void remove_process_thread(LPPROCESS process,LPTHREAD thread){
-	ID();
+	u64 rf;
+	SFI(rf);
 	LockProcessThread(process);//D0
 	process->thread_count--;
 	if(!process->thread_count){
@@ -187,12 +191,13 @@ void remove_process_thread(LPPROCESS process,LPTHREAD thread){
 			UnlockThreadPList(thread);//E2
 		}
 	}
-	IE();
+	LF(rf);
 }
 //将线程插入到进程的线程链表中
 void insert_process_thread(LPPROCESS process,LPTHREAD thread){
 	LPTHREAD _thread;
-	ID();
+	u64 rf;
+	SFI(rf);
 	LockProcessThread(process);//D0
 	process->thread_count++;
 	thread->father = process;
@@ -227,7 +232,7 @@ void insert_process_thread(LPPROCESS process,LPTHREAD thread){
 			UnlockThreadPList(thread);//E3
 		}
 	}
-	IE();	
+	LF(rf);	
 }
 
 void schedule2(){
@@ -237,12 +242,13 @@ void schedule2(){
 	int cur_max;
 	int time = 0;
 	LPPROCESS process;
+	u64 rf;
 	
 	lock_btr_private(flags,CPU_FLAGS_NEED_SCHEDULE);
 	write_private_dword(cpu_time,CPU_TIME);
 	while(freshing_cur_max);
 	cur_max = current_thread_max;
-	ID();
+	SFI(rf);
 	old = GetCurThread();
 	next = thread_list + old->solt + 1;
 	while(1){
@@ -250,12 +256,13 @@ void schedule2(){
 			next = thread_list;
 			time++;
 			if(time > 4) {
-				IE();
+				LF(rf);
 				return;
 			}
 		}
-		if((!(new = *next)) || 
-			(u64)new == 1 || 
+		new = *next;
+
+		if(!new || (u64)new == 1 || 
 			new->flag != TF_ACTIVE || 
 			TryLockThreadStatus(new)) {
 			next++;
@@ -263,11 +270,6 @@ void schedule2(){
 		}
 		new->processor = GetCPUId();
 		pdb = PADDR2V(get_cr3());
-		if(!new->father){
-			cli();
-			printk("thread %P,%d on bug,%P,%d.\n",new,new->id,old,old->id);
-			stop();
-		}
 		if(new->father != GetCurProcess()){
 			SetCurProcess(new->father);
 			memcpy(pdb,new->father->pdbe,255 * 8);
@@ -279,10 +281,10 @@ void schedule2(){
 		if(suppose_sysenter) wrmsr(IA32_SYSENTER_ESP,new->ker_ent_rsp);//切换内核堆栈入口
 		write_private_dword(TSS.reg[RSPL(0)],new->ker_ent_rsp & 0x00000000ffffffff);//切换内核堆栈入口
 		write_private_dword(TSS.reg[RSPH(0)],new->ker_ent_rsp >> 32);//切换内核堆栈入口
-		//printk("Switch to %P.",new);
+		//printk("cpu %d,Switch to %d.\n",GetCPUId(),new->id);
 		old = switch_task_b(&(old->rsp),new->rsp,old);
 		UnlockThreadStatus(old);
-		IE();
+		LF(rf);
 		if(old->flag == TF_DESTORY){
 			thread_list[old->solt] = NULL;
 			free_stack(old->stack);
@@ -327,7 +329,6 @@ void __attribute__((noreturn)) exit(int code){
 	LPTHREAD thread;
 	LPPROCESS process;
 	thread = GetCurThread();
-	cli();
 	free_area(thread,0x00007f8000000000,0x0000007ffffff000);
 	process = thread->father;
 	remove_process_thread(process,thread);
@@ -335,14 +336,13 @@ void __attribute__((noreturn)) exit(int code){
 	if(!process->thread_count){
 		free_page_table(process);
 		if(process->image_name) kfree(process->image_name);
-		if(process->by_shell) wake_up(process->father);
+		if(process->by_shell) process->f_thread->flag = TF_ACTIVE;
 		else {
 			remove_process(process);
 			kfree(process);
 		}
 	}
 	cli();
-	//printk("destory %P.",thread);
 	thread->flag = TF_DESTORY;
 	thread_list[thread->solt] = NULL;
 	schedule2();
@@ -360,24 +360,29 @@ int wake_up(LPTHREAD thread){
 
 	if(!thread || !addr_vaild(NULL,thread) || thread->gst != GST_THREAD) return ERR_INVAILD_PTR;
 	thread->flag = TF_ACTIVE;
-	if(GetCurThread()->solt < processor_count) schedule2();
 	return 0;
 }
 static void wait_call_back(LPTIMER timer,LPTHREAD thread){
-	wake_up(thread);
+	thread->wait_state = TFW_OUT_OF_TIME;
+	thread->flag = TF_ACTIVE;
 }
 int wait(int msecond){
 	LPTHREAD thread;
 	LPTIMER timer;
 	int ret;
-	
+	u64 rf;
+
 	thread = GetCurThread();
+	SFI(rf);
+	thread->flag = TF_BLOCK;
 	if(msecond){
-		timer_alloc(msecond,TMR_MOD_ONCE,wait_call_back,thread);
+		timer = timer_alloc(msecond,TMR_MOD_ONCE,wait_call_back,thread);
 		timer_start(timer);
+		schedule2();
 		timer_free(timer);
 	}
 	else schedule2();
+	LF(rf);
 	if(thread->need_destory) exit(ERR_BE_DESTORY);
 	return 0;
 }
@@ -388,11 +393,14 @@ int destory_mutex(struct _MUTEX_ * mutex){
 	struct _THREAD_ * thread;
 	
 	LockMutex(mutex);//抢占信号量
-	mutex->flags |= MUTEX_KILLING;//设置销毁标志
-	while(thread = mutex->wait.t)//逐个唤醒正在等待的线程
-		wake_up(thread);
-	while(thread = mutex->release.t)
-		wake_up(thread);
+	while(thread = mutex->wait.t){//逐个唤醒正在等待的线程
+		thread->wait_state = TFW_RESOURCE_DESTORY;
+		thread->flag = TF_ACTIVE;
+	}
+	while(thread = mutex->release.t){
+		thread->wait_state = TFW_RESOURCE_DESTORY;
+		thread->flag = TF_ACTIVE;
+	}
 	if(mutex->flags & MUTEX_ALLOC) kfree(mutex);//释放信号量
 	return 0;
 }
@@ -409,46 +417,47 @@ struct _MUTEX_ * create_mutex_ex(int locked,struct _MUTEX_ * mutex){//创建一�
 	return mutex;
 }
 static void mutex_timer_call_back(LPTIMER timer,LPTHREAD thread){//线程等待超时时则调用此函数，唤醒线程
-	thread->semaphore_val = 1;
-	wake_up(thread);
+	thread->wait_state = TFW_OUT_OF_TIME;
+	thread->flag = TF_ACTIVE;
 }
 int wait_mutex(struct _MUTEX_ * mutex,int time){//抢占资源
 	LPTHREAD thread;
 	LPTHREAD * prev;
 	volatile LPTHREAD next;
 	LPTIMER timer;
+	u64 rf;
 
 	if(!mutex) return ERR_INVAILD_PTR;//非法指针
 	thread = GetCurThread();
-	ID();//关中断
+	SFI(rf);//关中断
 	LockMutex(mutex);//抢占信号量
 	if(mutex->wait.t || mutex->flags & MUTEX_LOCKED){//若资源不足或已有线程在等待（服从先到先服务）
 		if(!time){//不等待则直接返回资源不足
 			UnlockMutex(mutex);
-			IE();
+			LF(rf);
 			return ERR_RESOURCE_BUSY;
 		}
-		thread->flag = TF_ACTIVE;
+		thread->flag = TF_BLOCK;
 		prev = mutex->wait.p;
 		mutex->wait.p = & next;
 		if(prev) * prev = thread;
 		if(!mutex->wait.t) mutex->wait.t = thread;
-		thread->semaphore_val = 0;
+		thread->wait_state = 0;
 		UnlockMutex(mutex);
 		if(time != -1){//有限等待则重启计时器
-			timer = timer_alloc(time,TMR_MOD_ONCE,mutex_timer_call_back,mutex);
+			timer = timer_alloc(time,TMR_MOD_ONCE,mutex_timer_call_back,thread);
 			timer_start(timer);
 		}
-		IE();
-		schedule();//调度
+		LF(rf);
+		schedule2();//调度
 		if(time != -1) timer_free(timer);
-		if(mutex->flags & MUTEX_KILLING) {//若信号量正在销毁，则返回 无效的指针//if mutex is killing, just return is enough;
+		if(thread->wait_state == TFW_RESOURCE_DESTORY) {//若信号量正在销毁，则返回 无效的指针//if mutex is killing, just return is enough;
 			mutex->wait.t = next;
 			return ERR_INVAILD_PTR;
 		}
-		ID();
+		SFI(rf);
 		LockMutex(mutex);
-		if(thread->semaphore_val) {//wake up because of out of time;
+		if(thread->wait_state == TFW_OUT_OF_TIME) {//wake up because of out of time;
 	///		//Might i am not the first one	
 			if(thread == mutex->wait.t){//if i am first one;
 				mutex->wait.t = next;
@@ -460,7 +469,7 @@ int wait_mutex(struct _MUTEX_ * mutex,int time){//抢占资源
 				if(prev) *prev = next;
 			}
 			UnlockMutex(mutex);
-			IE();
+			LF(rf);
 			return ERR_RESOURCE_BUSY;
 		}
 	///	//wake up because resource is enough;
@@ -474,8 +483,8 @@ int wait_mutex(struct _MUTEX_ * mutex,int time){//抢占资源
 		if(!next) mutex->release.p = NULL;
 	}
 	UnlockMutex(mutex);
-	IE();
-	if(thread) wake_up(thread);	
+	LF(rf);
+	if(thread) thread->flag = TF_ACTIVE;	
 	return 0;
 }
 int release_mutex(struct _MUTEX_ * mutex,int time){
@@ -483,35 +492,36 @@ int release_mutex(struct _MUTEX_ * mutex,int time){
 	LPTHREAD * prev;
 	volatile LPTHREAD next;
 	LPTIMER timer;
+	u64 rf;
 	
 ///	if(heckArgument()) return ERR;
 	if(!mutex) return ERR_INVAILD_PTR;
 	thread = GetCurThread();
-	ID();
+	SFI(rf);
 	LockMutex(mutex);
 	if(mutex->flags & MUTEX_LOCKED || mutex->release.t){
 		if(!time){
 			UnlockMutex(mutex);
-			IE();
+			LF(rf);
 			return ERR_RESOURCE_BUSY;
 		}
 		
 		prev = mutex->release.p;
-		thread->flag = TF_ACTIVE;
+		thread->flag = TF_BLOCK;
 		mutex->release.p = & next;
 		if(prev) * prev = thread;
 		if(!mutex->release.t) mutex->release.t = thread;
-		thread->semaphore_val = 0;
+		thread->wait_state = 0;
 		UnlockMutex(mutex);
 		if(time != -1){//有限等待则重启计时器
-			timer = timer_alloc(time,TMR_MOD_ONCE,mutex_timer_call_back,mutex);
+			timer = timer_alloc(time,TMR_MOD_ONCE,mutex_timer_call_back,thread);
 			timer_start(timer);
 		}
-		IE();
+		LF(rf);
 		write_private_dword(cpu_time,0);
-		schedule();
+		schedule2();
 		if(time != -1) timer_free(timer);
-		if(mutex->flags & MUTEX_KILLING) {
+		if(thread->wait_state == TFW_RESOURCE_DESTORY) {
 			mutex->release.t = next;
 			return ERR_INVAILD_PTR;
 		}
@@ -520,10 +530,10 @@ int release_mutex(struct _MUTEX_ * mutex,int time){
 ///			return ERR;
 ///		}
 		thread = GetCurThread();
-		ID();
+		SFI(rf);
 		LockMutex(mutex);
 		
-		if(thread->semaphore_val) {//wake up because of out of time;
+		if(thread->wait_state == TFW_OUT_OF_TIME) {//wake up because of out of time;
 	///		//Might i am not the first one	
 			if(thread == mutex->release.t){//if i am first one;
 				mutex->release.t = next;
@@ -535,7 +545,7 @@ int release_mutex(struct _MUTEX_ * mutex,int time){
 				if(prev) *prev = next;
 			}
 			UnlockMutex(mutex);
-			IE();
+			LF(rf);
 			return ERR_RESOURCE_BUSY;
 		}
 	///	//wake up because resource is enough;
@@ -550,8 +560,8 @@ int release_mutex(struct _MUTEX_ * mutex,int time){
 		if(!next) mutex->wait.p = NULL;
 	}
 	UnlockMutex(mutex);
-	IE();
-	if(thread) wake_up(thread);	
+	LF(rf);
+	if(thread) thread->flag = TF_ACTIVE;	
 	return 0;
 }
 
@@ -560,10 +570,14 @@ int destory_semaphore(struct _SEMAPHORE_ * se){
 	
 	LockSemaphore(se);//抢占信号量
 	se->flags |= SE_KILLING;//设置销毁标志
-	while(thread = se->wait.p)//逐个唤醒正在等待的线程
-		wake_up(thread);
-	while(thread = se->release.p)
-		wake_up(thread);
+	while(thread = se->wait.p){//逐个唤醒正在等待的线程
+		thread->wait_state = TFW_RESOURCE_DESTORY;
+		thread->flag = TF_ACTIVE;
+	}
+	while(thread = se->release.p){
+		thread->wait_state = TFW_RESOURCE_DESTORY;
+		thread->flag = TF_ACTIVE;
+	}
 	if(se->flags & SE_ALLOC) kfree(se);//释放信号量
 	return 0;
 }
@@ -581,48 +595,50 @@ struct _SEMAPHORE_ * create_semaphore_ex(int max,int cur,struct _SEMAPHORE_ * se
 	return se;
 }
 static void semaphore_timer_call_back(LPTIMER timer,LPTHREAD thread){//线程等待超时时则调用此函数，唤醒线程
-	wake_up(thread);
+	thread->wait_state = TFW_OUT_OF_TIME;
+	thread->flag = TF_ACTIVE;
 }
 int wait_semaphore(int val,struct _SEMAPHORE_ * se,int time){//抢占资源
 	LPTHREAD thread;
 	LPTHREAD * prev;
 	LPTHREAD next;
 	LPTIMER timer;
+	u64 rf;
 
 	if(!se) return ERR_INVAILD_PTR;//非法指针
 	if(!val) return 0;//不抢占任何资源则直接返回
 	if(val > se->max) return ERR_OUT_OF_RANGE;//抢占超过总数的资源
 	thread = GetCurThread();
-	ID();//关中断
+	SFI(rf);//关中断
 	LockSemaphore(se);//抢占信号量
 	if(se->wait.t || se->cur < val){//若资源不足或已有线程在等待（服从先到先服务）
 		if(!time){//不等待则直接返回资源不足
 			UnlockSemaphore(se);
-			IE();
+			LF(rf);
 			return ERR_RESOURCE_BUSY;
 		}
-		thread->flag = TF_ACTIVE;
+		thread->flag = TF_BLOCK;
 		prev = se->wait.p;
 		se->wait.p = &next;
 		if(prev) * prev = thread;
 		if(!se->wait.t) se->wait.t = thread;   
 		thread->semaphore_val = val;
+		thread->wait_state = 0;
 		UnlockSemaphore(se);
-		IE();
+		LF(rf);
 		if(time != -1){//有限等待则重启计时器
-			timer = timer_alloc(time,TMR_MOD_ONCE,semaphore_timer_call_back,se);
+			timer = timer_alloc(time,TMR_MOD_ONCE,semaphore_timer_call_back,thread);
 			timer_start(timer);
 		}
-		schedule();//调度
+		schedule2();//调度
 		if(time != -1) timer_free(timer);
-		if(se->flags & SE_KILLING) {//若信号量正在销毁，则返回 无效的指针
+		if(thread->wait_state == TFW_RESOURCE_DESTORY) {//若信号量正在销毁，则返回 无效的指针
 			se->wait.t = next;
 			return ERR_INVAILD_PTR;
 		}
-		ID();
+		SFI(rf);
 		LockSemaphore(se);
-		thread = GetCurThread();
-		if(se->cur < val) {
+		if(thread->wait_state == TFW_OUT_OF_TIME) {
 			if(thread == se->wait.t){
 				se->wait.t = next;
 				if(!next) se->wait.p = NULL;
@@ -633,7 +649,7 @@ int wait_semaphore(int val,struct _SEMAPHORE_ * se,int time){//抢占资源
 				if(prev) *prev = next;
 			}
 			UnlockSemaphore(se);
-			IE();
+			LF(rf);
 			return ERR_RESOURCE_BUSY;
 		}
 		se->wait.t = next;
@@ -644,16 +660,16 @@ int wait_semaphore(int val,struct _SEMAPHORE_ * se,int time){//抢占资源
 		thread = se->release.t;
 		se->release.t = next;
 		if(!next) se->release.p = NULL;
-		wake_up(thread);
+		thread->flag = TF_ACTIVE;
 	}
 	if(se->wait.t && se->cur >= se->wait.t->semaphore_val) {
 		thread = se->wait.t;
 		se->wait.t = next;
 		if(!next) se->wait.p = NULL;
-		wake_up(thread);
+		thread->flag = TF_ACTIVE;
 	}
 	UnlockSemaphore(se);
-	IE();
+	LF(rf);
 	return 0;
 }
 int release_semaphore(int val,struct _SEMAPHORE_ * se,int time){
@@ -661,40 +677,42 @@ int release_semaphore(int val,struct _SEMAPHORE_ * se,int time){
 	LPTHREAD * prev;
 	volatile LPTHREAD next;
 	LPTIMER timer;
+	u64 rf;
 	
 	if(!se) return ERR_INVAILD_PTR;
 	if(!val) return 0;
 	if(val > se->max) return ERR_OUT_OF_RANGE;
-	ID();
+	SFI(rf);
 	LockSemaphore(se);
 	if(se->cur + val > se->max || se->release.t){
 		if(!time){
 			UnlockSemaphore(se);
-			IE();
+			LF(rf);
 			return ERR_RESOURCE_BUSY;
 		}
-		thread->flag = TF_ACTIVE;
+		thread->flag = TF_BLOCK;
 		prev = se->release.p;
 		se->release.p = &next;
 		if(prev) * prev = thread;
 		if(!se->release.t) se->release.t = thread;   
 		thread->semaphore_val = val;
+		thread->wait_state = 0;
 		UnlockSemaphore(se);
-		IE();
+		LF(rf);
 		if(time != -1){//有限等待则重启计时器
-			timer = timer_alloc(time,TMR_MOD_ONCE,semaphore_timer_call_back,se);
+			timer = timer_alloc(time,TMR_MOD_ONCE,semaphore_timer_call_back,thread);
 			timer_start(timer);
 		}
-		schedule();
+		schedule2();
 		if(time != -1) timer_stop(timer);
-		if(se->flags & SE_KILLING) {//若信号量正在销毁，则返回 无效的指针
+		if(thread->wait_state == TFW_RESOURCE_DESTORY) {//若信号量正在销毁，则返回 无效的指针
 			se->release.t = next;
 			return ERR_INVAILD_PTR;
 		}
-		ID();
+		SFI(rf);
 		LockSemaphore(se);
 		thread = GetCurThread();
-		if(se->cur < val) {
+		if(thread->wait_state == TFW_OUT_OF_TIME) {
 			if(thread == se->release.t){
 				se->release.t = next;
 				if(!next) se->release.p = NULL;
@@ -705,7 +723,7 @@ int release_semaphore(int val,struct _SEMAPHORE_ * se,int time){
 				if(prev) *prev = next;
 			}
 			UnlockSemaphore(se);
-			IE();
+			LF(rf);
 			return ERR_RESOURCE_BUSY;
 		}
 		se->release.t = next;
@@ -716,16 +734,16 @@ int release_semaphore(int val,struct _SEMAPHORE_ * se,int time){
 		thread = se->wait.t;
 		se->wait.t = next;
 		if(!next) se->wait.p = NULL;
-		wake_up(thread);
+		thread->flag = TF_ACTIVE;
 	}
 	if(se->release.t && se->cur >= se->release.t->semaphore_val) {
 		thread = se->release.t;
 		se->release.t = next;
 		if(!next) se->release.p = NULL;
-		wake_up(thread);
+		thread->flag = TF_ACTIVE;
 	}
 	UnlockSemaphore(se);
-	IE();
+	LF(rf);
 	return 0;
 }
 
@@ -733,8 +751,8 @@ static void thread_entry(int (*entry)(void*),LPTHREAD old){
 	LPSTREAM image;
 	LPPROCESS process;
 	LPTHREAD self;
-	
-	IE();
+
+	sti();
 	if(old) {
 		UnlockThreadStatus(old);
 		if(old->flag == TF_DESTORY){
@@ -868,14 +886,13 @@ void __attribute__((noreturn)) schedule_init_ap(int (*entry)(void*),void * argv)
 	LPPROCESS process;
 	u64 * stack;
 	u64 __rsp;
+	u64 rf;
 	
-	ID();
+	SFI(rf);
 	{//initlize thread status.
 		thread = kmalloc(sizeof(THREAD),0);
 		memset(thread,0,sizeof(THREAD));
-		if((thread->solt = find_first_empty()) < 0){
-			//err
-		}
+		thread->solt = find_first_empty();
 		thread->gst = GST_THREAD;
 		thread->flag = TF_ACTIVE;
 		thread->processor = GetCPUId();
@@ -907,7 +924,7 @@ void __attribute__((noreturn)) schedule_init_ap(int (*entry)(void*),void * argv)
 	SetCurProcess(process);
 	SetCurThread(thread);
 	LockThreadStatus(thread);
-	SE();
+	LF(rf);
 	thread_exit(__rsp,entry,NULL);
 }
 void __attribute__((noreturn)) schedule_init(int (*entry)(void*),void * argv){
@@ -927,10 +944,7 @@ void __attribute__((noreturn)) schedule_init(int (*entry)(void*),void * argv){
 	{//thread 0
 		thread = kmalloc(sizeof(THREAD),0);
 		memset(thread,0,sizeof(THREAD));
-		if((thread->solt = find_first_empty()) < 0){
-			
-			
-		}
+		thread->solt = find_first_empty();
 		thread->gst = GST_THREAD;
 		thread->father = process;
 		thread->flag = TF_ACTIVE;

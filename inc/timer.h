@@ -62,4 +62,6 @@ int timer_start(LPTIMER timer);
 int timer_stop(LPTIMER timer);
 int reg_counter(struct _COUNTER_ * counter);
 
+u64 ticks;
+
 #endif

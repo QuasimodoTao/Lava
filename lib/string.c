@@ -352,35 +352,52 @@ void * wmemset(void * Des,int Val,size_t Count){
 	return Des;
 }
 void * memcpy(void * d,void * s,size_t n){
-	asm("rep\n\t"
+	asm(
+		"cmpq %%rsi,%%rdi\n\t"
+		"jz _memcpyl0\n\t"
+		"jb _memcpyl1\n\t"
+		"leaq -1(%%rsi,%%rcx,1),%%rsi\n\t"
+		"leaq -1(%%rdi,%%rcx,1),%%rdi\n\t"
+		"std\n\t"
+		"_memcpyl1:\n\t"
+		"rep\n\t"
 		"movsb\n\t"
-		:"=r"(d)
-		:"0"(d),"S"(s),"D"(d),"c"(n)
+		"cld\n\t"
+		"_memcpyl0:\n\t"
+		:"=D"(d)
+		:"D"(d),"S"(s),"c"(n)
 	);
 	return d;
 }
 void * wmemcpy(void * d,void * s,size_t n){
-	asm("rep\n\t"
+	asm(
+		"cmpq %%rsi,%%rdi\n\t"
+		"jz _wmemcpyl0\n\t"
+		"jb _wmemcpyl1\n\t"
+		"leaq -2(%%rsi,%%rcx,2),%%rsi\n\t"
+		"leaq -2(%%rdi,%%rcx,2),%%rdi\n\t"
+		"std\n\t"
+		"_wmemcpyl1:\n\t"
+		"rep\n\t"
 		"movsw\n\t"
-		:"=r"(d)
-		:"0"(d),"S"(s),"D"(d),"c"(n)
+		"cld\n\t"
+		"_wmemcpyl0:\n\t"
+		:"=D"(d)
+		:"D"(d),"S"(s),"c"(n)
 	);
 	return d;
 }
 void * memmove(void * Des,void * Scr,size_t Count){
 	asm("cmpq %%rsi,%%rdi\n\t"
-		"ja _memmovel0\n\t"
+		"jb _memmovel0\n\t"
 		"je _memmovel1\n\t"
 		"addq %%rcx,%%rsi\n\t"
 		"addq %%rcx,%%rdi\n\t"
 		"std\n\t"
-		"rep\n\t"
-		"movsb\n\t"
-		"cld\n\t"
-		"jmp _memmovel1\n\t"
 		"_memmovel0:\n\t"
 		"rep\n\t"
 		"movsb\n\t"
+		"cld\n\t"
 		"_memmovel1:"
 		:"=r"(Des)
 		:"S"(Scr),"D"(Des),"c"(Count),"0"(Des)
@@ -389,20 +406,15 @@ void * memmove(void * Des,void * Scr,size_t Count){
 }
 void * wmemmove(void * Des,void * Scr,size_t Count){
 	asm("cmpq %%rsi,%%rdi\n\t"
-		"ja _wmemmovel0\n\t"
+		"jb _wmemmovel0\n\t"
 		"je _wmemmovel1\n\t"
-		"addq %%rcx,%%rsi\n\t"
-		"addq %%rcx,%%rsi\n\t"
-		"addq %%rcx,%%rdi\n\t"
-		"addq %%rcx,%%rdi\n\t"
+		"leaq -2(%%rsi,%%rcx,2),%%rsi\n\t"
+		"leaq -2(%%rdi,%%rcx,2),%%rdi\n\t"
 		"std\n\t"
-		"rep\n\t"
-		"movsw\n\t"
-		"cld\n\t"
-		"jmp _wmemmovel1\n\t"
 		"_wmemmovel0:\n\t"
 		"rep\n\t"
 		"movsw\n\t"
+		"cld\n\t"
 		"_wmemmovel1:"
 		:"=r"(Des)
 		:"S"(Scr),"D"(Des),"c"(Count),"0"(Des)

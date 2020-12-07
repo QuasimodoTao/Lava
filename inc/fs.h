@@ -129,7 +129,7 @@ u64 inline tell_put(LPSTREAM file){
 #endif
 	return file->fc->tell_put(file);	
 }
-int inline get(LPSTREAM file){
+static int inline get(LPSTREAM file){
 #ifdef CHECK
 	if(!file || !file->fc || !file->fc->get) return ERR_INVAILD_PTR;
 #endif

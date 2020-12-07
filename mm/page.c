@@ -253,13 +253,11 @@ static void pg_ext_depress_new(u64 * pde,u64 user_mode){
 
 static int allocate_area_4K(LPTHREAD thread,VADDR vaddr,u32 count,int attr){
 	u64 * p4,*p3,*p2,*p1;
-	u32 p4e,p3e,p2e,p1e;
-	void * bit_map;
+	u32 p4e,p3e,p2e,p1e,i;
+	void * bit_map = NULL;
 	PAGEE page;
 	LPPROCESS process;
-	u32 i;
-	u64 first;
-	u64 user_mode = 0;
+	u64 first,rf,user_mode = 0;
 	
 	if(!count) return 0;
 	p4e = P4E(vaddr);
@@ -281,12 +279,12 @@ static int allocate_area_4K(LPTHREAD thread,VADDR vaddr,u32 count,int attr){
 			p4 = process->pdbe;
 		}
 	}
-	SD();
-	LockPDE(p4,p4e);
+	SFI(rf);
 	p3e = P3E(vaddr);
+	LockPDE(p4,p4e);
 	if(!(p4[p4e] & PAGE_EXIST) && pg_ext_test_and_depress_new(p4 + p4e,p3e,user_mode)){
 		UnlockPDE(p4,p4e);
-		SE();
+		LF(rf);
 		return -1;
 	}
 	p3 = PADDR2V(p4[p4e]);
@@ -297,7 +295,7 @@ static int allocate_area_4K(LPTHREAD thread,VADDR vaddr,u32 count,int attr){
 		if((!(p3[p3e] & PAGE_EXIST) && pg_ext_test_and_depress_new(p3 + p3e,p2e,user_mode)) || 
 			p3[p3e] & PAGE_BIG){
 			UnlockPDE(p3,p3e);
-			SE();
+			LF(rf);
 			return -1;
 		}
 		p2 = PADDR2V(p3[p3e]); 
@@ -308,14 +306,14 @@ static int allocate_area_4K(LPTHREAD thread,VADDR vaddr,u32 count,int attr){
 			if(p2[p2e] & PAGE_ALLOCATED_MASK){
 				if(!(p2[p2e] & PAGE_BIT_MAP_MASK)) {
 					UnlockPDE(p2,p2e);
-					SE();
+					LF(rf);
 					return -1;
 				}
 				bit_map = PAGE2MAP(p2[p2e]);
 				for(i = 0;i < count;i++,p1e++){
 					if(bt(bit_map,p1e)){
 						UnlockPDE(p2,p2e);
-						SE();
+						LF(rf);
 						return -1;
 					}
 				}
@@ -335,7 +333,7 @@ static int allocate_area_4K(LPTHREAD thread,VADDR vaddr,u32 count,int attr){
 		}
 		else if(p2[p2e] & PAGE_BIG){
 			UnlockPDE(p2,p2e);
-			SE();
+			LF(rf);
 			return -1;
 		}
 		else{
@@ -343,7 +341,7 @@ static int allocate_area_4K(LPTHREAD thread,VADDR vaddr,u32 count,int attr){
 			for(i = 0;i < count;i++,p1e++){
 				if(!(p1[p1e] & PAGE_EXIST)) continue;
 				UnlockPDE(p2,p2e);
-				SE();
+				LF(rf);
 				return -1;
 			}
 			p1e = P1E(vaddr);
@@ -355,7 +353,7 @@ static int allocate_area_4K(LPTHREAD thread,VADDR vaddr,u32 count,int attr){
 			p1e++;
 		}
 		UnlockPDE(p2,p2e);
-		SE();
+		LF(rf);
 		return 0;
 	}
 	//可以使用扩展页结构记录
@@ -364,7 +362,7 @@ static int allocate_area_4K(LPTHREAD thread,VADDR vaddr,u32 count,int attr){
 		//对应地址已有效，返回错误
 		UnlockPDE(p3,p3e);
 		UnlockPDE(p4,p4e);
-		SE();
+		LF(rf);
 		return -1;
 	}
 	p2 = PADDR2V(p3[p3e]);
@@ -377,7 +375,7 @@ static int allocate_area_4K(LPTHREAD thread,VADDR vaddr,u32 count,int attr){
 		if(p1[p1e] & (PAGE_EXIST | PAGE_ALLOCATED_MASK)){
 			//对应地址已有效，返回错误
 			UnlockPDE(p2,p2e);
-			SE();
+			LF(rf);
 			return -1;
 		}
 		while(count){
@@ -386,7 +384,7 @@ static int allocate_area_4K(LPTHREAD thread,VADDR vaddr,u32 count,int attr){
 			p1e++;
 		}
 		UnlockPDE(p2,p2e);
-		SE();
+		LF(rf);
 		return 0;
 	}
 	if(!(p2[p2e] & PAGE_ALLOCATED_MASK)){
@@ -403,14 +401,14 @@ static int allocate_area_4K(LPTHREAD thread,VADDR vaddr,u32 count,int attr){
 		p2[p2e] = (first << PAGE_FIRST_SHIFT) | PAGE_ALLOCATED_MASK | 
 			((u64)bit_map & PAGE_BIT_MAP_MASK);
 		//UnlockPDE(p2,p2e);
-		SE();
+		LF(rf);
 		return 0;
 	}
 	if(!(p2[p2e] & PAGE_BIT_MAP_MASK)){
 		UnlockPDE(p2,p2e);
 		UnlockPDE(p3,p3e);
 		UnlockPDE(p4,p4e);
-		SE();
+		LF(rf);
 		return -1;
 	}
 	bit_map = PAGE2MAP(p2[p2e]);
@@ -419,7 +417,7 @@ static int allocate_area_4K(LPTHREAD thread,VADDR vaddr,u32 count,int attr){
 			UnlockPDE(p2,p2e);
 			UnlockPDE(p3,p3e);
 			UnlockPDE(p4,p4e);
-			SE();
+			LF(rf);
 			return -1;
 		}
 	}
@@ -435,7 +433,7 @@ static int allocate_area_4K(LPTHREAD thread,VADDR vaddr,u32 count,int attr){
 		UnlockPDE(p2,p2e);
 		UnlockPDE(p3,p3e);
 		UnlockPDE(p4,p4e);
-		SE();
+		LF(rf);
 		return 0;
 	}
 	while((first < PAGE_ENT_MASK + 1) && bt(bit_map,first)) first++;
@@ -445,7 +443,7 @@ static int allocate_area_4K(LPTHREAD thread,VADDR vaddr,u32 count,int attr){
 		UnlockPDE(p2,p2e);
 		UnlockPDE(p3,p3e);
 		UnlockPDE(p4,p4e);
-		SE();
+		LF(rf);
 		return 0;
 	}
 	p2[p2e] = PAGE_ALLOCATED_MASK | (attr & PAGE_USER);
@@ -463,7 +461,7 @@ static int allocate_area_4K(LPTHREAD thread,VADDR vaddr,u32 count,int attr){
 	if(i <= PAGE_ENT_MASK){
 		UnlockPDE(p3,p3e);
 		UnlockPDE(p4,p4e);
-		SE();
+		LF(rf);
 		kfree(bit_map);
 		return 0;
 	}
@@ -473,7 +471,7 @@ static int allocate_area_4K(LPTHREAD thread,VADDR vaddr,u32 count,int attr){
 		p3[p3e] |= ((u64)bit_map & PAGE_BIT_MAP_MASK) | (first << PAGE_FIRST_SHIFT);
 		UnlockPDE(p3,p3e);
 		UnlockPDE(p4,p4e);
-		SE();
+		LF(rf);
 		return 0;
 	}
 	p3[p3e] = PAGE_ALLOCATED_MASK | (attr & PAGE_USER);
@@ -490,7 +488,7 @@ static int allocate_area_4K(LPTHREAD thread,VADDR vaddr,u32 count,int attr){
 	}
 	if(i <= PAGE_ENT_MASK){
 		UnlockPDE(p4,p4e);
-		SE();
+		LF(rf);
 		kfree(bit_map);
 		return 0;
 	}
@@ -498,14 +496,14 @@ static int allocate_area_4K(LPTHREAD thread,VADDR vaddr,u32 count,int attr){
 	if(first >= PAGE_ENT_MASK + 1) {
 		p4[p4e] = PAGE_ALLOCATED_MASK | (attr & PAGE_USER);
 		//UnlockPDE(p4,p4e);
-		SE();
+		LF(rf);
 		kfree(bit_map);
 		return 0;
 	}
 	p4[p4e] &= ~(PAGE_BIT_MAP_MASK | PAGE_FIRST_MASK);
 	p4[p4e] |= ((u64)bit_map & PAGE_BIT_MAP_MASK) | (first << PAGE_FIRST_SHIFT);
 	UnlockPDE(p4,p4e);
-	SE();
+	LF(rf);
 	return 0;
 }
 static int allocate_area_2M(LPTHREAD thread,VADDR vaddr,u32 count,int attr){
@@ -517,6 +515,7 @@ static int allocate_area_2M(LPTHREAD thread,VADDR vaddr,u32 count,int attr){
 	u32 i,j;
 	u64 first;
 	u64 user_mode = 0;
+	u64 rf;
 	
 	if(!count) return 0;
 	p4e = P4E(vaddr);
@@ -538,12 +537,12 @@ static int allocate_area_2M(LPTHREAD thread,VADDR vaddr,u32 count,int attr){
 			p4 = process->pdbe;
 		}
 	}
-	SD();
+	SFI(rf);
 	LockPDE(p4,p4e);
 	p3e = P3E(vaddr);
 	if(!(p4[p4e] & PAGE_EXIST) && pg_ext_test_and_depress_new(p4 + p4e,p3e,user_mode)){
 		UnlockPDE(p4,p4e);
-		SE();
+		LF(rf);
 		return -1;
 	}
 	p3 = PADDR2V(p4[p4e]);
@@ -559,14 +558,14 @@ static int allocate_area_2M(LPTHREAD thread,VADDR vaddr,u32 count,int attr){
 					for(j = 0;j <= PAGE_ENT_MASK;j++){
 						if(p1[j] & PAGE_EXIST || p1[j] & PAGE_ALLOCATED_MASK) {
 							UnlockPDE(p3,p3e);
-							SE();
+							LF(rf);
 							return -1;
 						}
 					}
 				}
 				else if (p2[p2e] & PAGE_ALLOCATED_MASK) {
 					UnlockPDE(p3,p3e);
-					SE();
+					LF(rf);
 					return -1;
 				}
 			}
@@ -579,7 +578,7 @@ static int allocate_area_2M(LPTHREAD thread,VADDR vaddr,u32 count,int attr){
 				p2e++;
 			}
 			UnlockPDE(p3,p3e);
-			SE();
+			LF(rf);
 			return 0;
 		}
 		if(!(p3[p3e] & PAGE_ALLOCATED_MASK)){
@@ -594,12 +593,12 @@ static int allocate_area_2M(LPTHREAD thread,VADDR vaddr,u32 count,int attr){
 				p2e++;
 			}
 			UnlockPDE(p3,p3e);
-			SE();
+			LF(rf);
 			return 0;
 		}
 		if(!(p3[p3e] & PAGE_BIT_MAP_MASK)){
 			UnlockPDE(p3,p3e);
-			SE();
+			LF(rf);
 			return -1;
 		}
 		p2e = P2E(vaddr);
@@ -607,7 +606,7 @@ static int allocate_area_2M(LPTHREAD thread,VADDR vaddr,u32 count,int attr){
 		for(i = 0;i < count;i++,p2e++){
 			if(bt(bit_map,p2e)){
 				UnlockPDE(p3,p3e);
-				SE();
+				LF(rf);
 				return -1;
 			}
 		}
@@ -627,7 +626,7 @@ static int allocate_area_2M(LPTHREAD thread,VADDR vaddr,u32 count,int attr){
 			p2e++;
 		}
 		UnlockPDE(p3,p3e);
-		SE();
+		LF(rf);
 		return 0;
 	}
 	if(p3[p3e] & PAGE_EXIST){
@@ -639,7 +638,7 @@ static int allocate_area_2M(LPTHREAD thread,VADDR vaddr,u32 count,int attr){
 				for(j = 0;j <= PAGE_ENT_MASK;j++){
 					if(p1[j] & PAGE_EXIST || p1[j] & PAGE_ALLOCATED_MASK) {
 						UnlockPDE(p3,p3e);
-						SE();
+						LF(rf);
 						return -1;
 					}
 				}
@@ -648,7 +647,7 @@ static int allocate_area_2M(LPTHREAD thread,VADDR vaddr,u32 count,int attr){
 			}
 			else if(p2[p2e] & PAGE_ALLOCATED_MASK){
 				UnlockPDE(p3,p3e);
-				SE();
+				LF(rf);
 				return -1;
 			}
 		}
@@ -659,7 +658,7 @@ static int allocate_area_2M(LPTHREAD thread,VADDR vaddr,u32 count,int attr){
 			p2e++;
 		}
 		UnlockPDE(p3,p3e);
-		SE();
+		LF(rf);
 		return 0;
 	}
 	if(!(p3[p3e] & PAGE_ALLOCATED_MASK)){
@@ -674,13 +673,13 @@ static int allocate_area_2M(LPTHREAD thread,VADDR vaddr,u32 count,int attr){
 		}
 		p3[p3e] = PAGE_ALLOCATED_MASK | ((u64)bit_map & PAGE_BIT_MAP_MASK) | (attr & (PAGE_WRITE | PAGE_USER));
 		//UnlockPDE(p3,p3e);
-		SE();
+		LF(rf);
 		return 0;
 	}
 	if(!(p3[p3e] & PAGE_BIT_MAP_MASK)){
 		UnlockPDE(p3,p3e);
 		UnlockPDE(p4,p4e);
-		SE();
+		LF(rf);
 		return -1;
 	}
 	p2e = P2E(vaddr);
@@ -689,7 +688,7 @@ static int allocate_area_2M(LPTHREAD thread,VADDR vaddr,u32 count,int attr){
 		if(bt(bit_map,p2e)){
 			UnlockPDE(p3,p3e);
 			UnlockPDE(p4,p4e);
-			SE();
+			LF(rf);
 			return -1;
 		}
 	}
@@ -704,7 +703,7 @@ static int allocate_area_2M(LPTHREAD thread,VADDR vaddr,u32 count,int attr){
 	if(first < p2e){
 		UnlockPDE(p3,p3e);
 		UnlockPDE(p4,p4e);
-		SE();
+		LF(rf);
 		return 0;
 	}
 	while((first < PAGE_ENT_MASK + 1) && bt(bit_map,first)) first++;
@@ -713,7 +712,7 @@ static int allocate_area_2M(LPTHREAD thread,VADDR vaddr,u32 count,int attr){
 		p3[p3e] |= first << PAGE_FIRST_SHIFT;
 		UnlockPDE(p3,p3e);
 		UnlockPDE(p4,p4e);
-		SE();
+		LF(rf);
 		return 0;
 	}
 	p3[p3e] = PAGE_ALLOCATED_MASK | (attr & PAGE_USER);
@@ -731,7 +730,7 @@ static int allocate_area_2M(LPTHREAD thread,VADDR vaddr,u32 count,int attr){
 	}
 	if(i <= PAGE_ENT_MASK){
 		UnlockPDE(p4,p4e);
-		SE();
+		LF(rf);
 		kfree(bit_map);
 		return 0;
 	}
@@ -739,14 +738,14 @@ static int allocate_area_2M(LPTHREAD thread,VADDR vaddr,u32 count,int attr){
 	if(first >= PAGE_ENT_MASK + 1) {
 		p4[p4e] = PAGE_ALLOCATED_MASK | (attr & PAGE_USER);
 		//UnlockPDE(p4,p4e);
-		SE();
+		LF(rf);
 		kfree(bit_map);
 		return 0;
 	}
 	p4[p4e] &= ~(PAGE_BIT_MAP_MASK | PAGE_FIRST_MASK);
 	p4[p4e] |= ((u64)bit_map & PAGE_BIT_MAP_MASK) | (first << PAGE_FIRST_SHIFT);
 	UnlockPDE(p4,p4e);
-	SE();
+	LF(rf);
 	return 0;
 }
 static int allocate_area_1G(LPTHREAD thread,VADDR vaddr,u32 count,int attr){
@@ -757,6 +756,7 @@ static int allocate_area_1G(LPTHREAD thread,VADDR vaddr,u32 count,int attr){
 	LPPROCESS process;
 	u32 i,j,k;
 	u64 first;
+	u64 rf;
 	
 	if(!count) return 0;
 	p4e = P4E(vaddr);
@@ -777,7 +777,7 @@ static int allocate_area_1G(LPTHREAD thread,VADDR vaddr,u32 count,int attr){
 			p4 = process->pdbe;
 		}
 	}
-	SD();
+	SFI(rf);
 	LockPDE(p4,p4e);
 	p3e = P3E(vaddr);
 	if(attr & PAGE_EXIST){
@@ -792,21 +792,21 @@ static int allocate_area_1G(LPTHREAD thread,VADDR vaddr,u32 count,int attr){
 							for(k = 0;k <= PAGE_ENT_MASK;k++){
 								if(p1[k] & PAGE_EXIST || p1[k] & PAGE_ALLOCATED_MASK){
 									UnlockPDE(p4,p4e);
-									SE();
+									LF(rf);
 									return -1;
 								}
 							}
 						}
 						else if(p2[j] & PAGE_ALLOCATED_MASK){
 							UnlockPDE(p4,p4e);
-							SE();
+							LF(rf);
 							return -1;
 						}
 					}
 				}
 				else if(p3[p3e] & PAGE_ALLOCATED_MASK){
 					UnlockPDE(p4,p4e);
-					SE();
+					LF(rf);
 					return -1;
 				}
 			}
@@ -829,7 +829,7 @@ static int allocate_area_1G(LPTHREAD thread,VADDR vaddr,u32 count,int attr){
 				p3e++;
 			}
 			UnlockPDE(p4,p4e);
-			SE();
+			LF(rf);
 			return 0;
 		}
 		if(!(p4[p4e] & PAGE_ALLOCATED_MASK)){
@@ -853,19 +853,19 @@ static int allocate_area_1G(LPTHREAD thread,VADDR vaddr,u32 count,int attr){
 				p3e++;
 			}
 			UnlockPDE(p4,p4e);
-			SE();
+			LF(rf);
 			return 0;
 		}
 		if(!(p4[p4e] & PAGE_BIT_MAP_MASK)){
 			UnlockPDE(p4,p4e);
-			SE();
+			LF(rf);
 			return -1;
 		}
 		bit_map = PAGE2MAP(p4[p4e]);
 		for(i = 0;i < count;i++,p3e++){
 			if(!bt(bit_map,p3e)) continue;
 			UnlockPDE(p4,p4e);
-			SE();
+			LF(rf);
 			return -1;
 		}
 		p4[p4e] = get_free_page(0,attr & PAGE_USER,0) | PAGE_BUSY_MASK;
@@ -888,7 +888,7 @@ static int allocate_area_1G(LPTHREAD thread,VADDR vaddr,u32 count,int attr){
 			p3e++;
 		}
 		UnlockPDE(p4,p4e);
-		SE();
+		LF(rf);
 		return 0;
 	}
 	if(p4[p4e] & PAGE_EXIST){
@@ -902,7 +902,7 @@ static int allocate_area_1G(LPTHREAD thread,VADDR vaddr,u32 count,int attr){
 						for(k = 0;k <= PAGE_ENT_MASK;k++){
 							if(p1[k] & PAGE_EXIST || p1[k] & PAGE_ALLOCATED_MASK){
 								UnlockPDE(p4,p4e);
-								SE();
+								LF(rf);
 								return -1;
 							}
 						}
@@ -911,7 +911,7 @@ static int allocate_area_1G(LPTHREAD thread,VADDR vaddr,u32 count,int attr){
 					}
 					else if(p2[j] & PAGE_ALLOCATED_MASK){
 						UnlockPDE(p4,p4e);
-						SE();
+						LF(rf);
 						return -1;
 					}
 				}
@@ -920,7 +920,7 @@ static int allocate_area_1G(LPTHREAD thread,VADDR vaddr,u32 count,int attr){
 			}
 			else if(p3[p3e] & PAGE_ALLOCATED_MASK){
 				UnlockPDE(p4,p4e);
-				SE();
+				LF(rf);
 				return -1;
 			}
 		}
@@ -931,7 +931,7 @@ static int allocate_area_1G(LPTHREAD thread,VADDR vaddr,u32 count,int attr){
 			p3e++;
 		}
 		UnlockPDE(p4,p4e);
-		SE();
+		LF(rf);
 		return 0;
 	}
 	if(!(p4[p4e] & PAGE_ALLOCATED_MASK)){
@@ -945,14 +945,14 @@ static int allocate_area_1G(LPTHREAD thread,VADDR vaddr,u32 count,int attr){
 		}
 		p4[p4e] = PAGE_ALLOCATED_MASK | ((u64)bit_map & PAGE_BIT_MAP_MASK) | (attr & (PAGE_WRITE | PAGE_USER));
 		//UnlockPDE(p4,p4e);
-		SE();
+		LF(rf);
 		return 0;
 	}
 	bit_map = PAGE2MAP(p4[p4e]);
 	for(i = 0;i < count;i++,p3e++){
 		if(!bt(bit_map,p3e)) continue;
 		UnlockPDE(p4,p4e);
-		SE();
+		LF(rf);
 		return -1;
 	}
 	p3e = P3E(vaddr);
@@ -963,7 +963,7 @@ static int allocate_area_1G(LPTHREAD thread,VADDR vaddr,u32 count,int attr){
 	}
 	if(first < p3e){
 		UnlockPDE(p4,p4e);
-		SE();
+		LF(rf);
 		return 0;
 	}
 	while((first < PAGE_ENT_MASK + 1) && bt(bit_map,first)) first++;
@@ -971,14 +971,14 @@ static int allocate_area_1G(LPTHREAD thread,VADDR vaddr,u32 count,int attr){
 		p4[p4e] &= ~PAGE_FIRST_MASK;
 		p4[p4e] |= first << PAGE_FIRST_SHIFT;
 		UnlockPDE(p4,p4e);
-		SE();
+		LF(rf);
 		return 0;
 	}
 	p4[p4e] = PAGE_ALLOCATED_MASK | (attr & PAGE_USER);
 	//UnlockPDE(p3,p3e);
 	kfree(bit_map);
 	UnlockPDE(p4,p4e);
-	SE();
+	LF(rf);
 	return 0;
 }
 int allocate_area(LPTHREAD thread,VADDR vaddr,size_t size,int attr){
@@ -994,6 +994,7 @@ int allocate_area(LPTHREAD thread,VADDR vaddr,size_t size,int attr){
 	PAGEE page;
 	LPPROCESS process;
 	VADDR vaddr_start;
+	u64 rf;
 	
 	if(!size) return 0;
 	start = (u64)vaddr & PAGE_PADDR_MASK_4K;
@@ -1070,7 +1071,7 @@ int allocate_area(LPTHREAD thread,VADDR vaddr,size_t size,int attr){
 				p4 = process->pdbe;
 			}
 		}
-		SD();
+		SFI(rf);
 		LockPDE(p4,p4e);
 		if(attr & PAGE_EXIST){
 			if(p4[p4e] & PAGE_EXIST){
@@ -1083,7 +1084,7 @@ int allocate_area(LPTHREAD thread,VADDR vaddr,size_t size,int attr){
 								for(p1e = 0;p1e <= PAGE_ENT_MASK;p1e++){
 									if(p1[p1e] & PAGE_EXIST || p1[p1e] & PAGE_ALLOCATED_MASK){
 										UnlockPDE(p4,p4e);
-										SE();
+										LF(rf);
 										free_area(thread,vaddr_start,allocated);
 										return -1;
 									}
@@ -1091,7 +1092,7 @@ int allocate_area(LPTHREAD thread,VADDR vaddr,size_t size,int attr){
 							}
 							else if(p2[p2e] & PAGE_ALLOCATED_MASK){
 								UnlockPDE(p4,p4e);
-								SE();
+								LF(rf);
 								free_area(thread,vaddr_start,allocated);
 								return -1;
 							}
@@ -1099,7 +1100,7 @@ int allocate_area(LPTHREAD thread,VADDR vaddr,size_t size,int attr){
 					}
 					else if(p3[p3e] & PAGE_ALLOCATED_MASK){
 						UnlockPDE(p4,p4e);
-						SE();
+						LF(rf);
 						free_area(thread,vaddr_start,allocated);
 						return -1;
 					}
@@ -1121,7 +1122,7 @@ int allocate_area(LPTHREAD thread,VADDR vaddr,size_t size,int attr){
 					}
 				}
 				UnlockPDE(p4,p4e);
-				SE();
+				LF(rf);
 				size -= PAGE_SIZE_512G;
 				allocated += PAGE_SIZE_512G;
 				start = PAGE_SIZE_512G;
@@ -1129,7 +1130,7 @@ int allocate_area(LPTHREAD thread,VADDR vaddr,size_t size,int attr){
 			}
 			if(p4[p4e] & PAGE_ALLOCATED_MASK){
 				UnlockPDE(p4,p4e);
-				SE();
+				LF(rf);
 				free_area(thread,vaddr_start,allocated);
 				return -1;
 			}
@@ -1150,7 +1151,7 @@ int allocate_area(LPTHREAD thread,VADDR vaddr,size_t size,int attr){
 				}
 			}
 			UnlockPDE(p4,p4e);
-			SE();
+			LF(rf);
 			size -= PAGE_SIZE_512G;
 			allocated += PAGE_SIZE_512G;
 			start = PAGE_SIZE_512G;
@@ -1166,7 +1167,7 @@ int allocate_area(LPTHREAD thread,VADDR vaddr,size_t size,int attr){
 							for(p1e = 0;p1e <= PAGE_ENT_MASK;p1e++){
 								if(p1[p1e] & PAGE_EXIST || p1[p1e] & PAGE_ALLOCATED_MASK){
 									UnlockPDE(p4,p4e);
-									SE();
+									LF(rf);
 									free_area(thread,vaddr_start,allocated);
 									return -1;
 								}
@@ -1176,7 +1177,7 @@ int allocate_area(LPTHREAD thread,VADDR vaddr,size_t size,int attr){
 						}
 						else if(p2[p2e] & PAGE_ALLOCATED_MASK){
 							UnlockPDE(p4,p4e);
-							SE();
+							LF(rf);
 							free_area(thread,vaddr_start,allocated);
 							return -1;
 						}
@@ -1186,7 +1187,7 @@ int allocate_area(LPTHREAD thread,VADDR vaddr,size_t size,int attr){
 				}
 				else if(p3[p3e] & PAGE_ALLOCATED_MASK){
 					UnlockPDE(p4,p4e);
-					SE();
+					LF(rf);
 					free_area(thread,vaddr_start,allocated);
 					return -1;
 				}
@@ -1194,14 +1195,14 @@ int allocate_area(LPTHREAD thread,VADDR vaddr,size_t size,int attr){
 			free_page(p4[p4e]);
 			p4[p4e] = PAGE_ALLOCATED_MASK;
 			//UnlockPDE(p4,p4e);
-			SE();
+			LF(rf);
 			size -= PAGE_SIZE_512G;
 			allocated += PAGE_SIZE_512G;
 			start = PAGE_SIZE_512G;
 			continue;
 		}
 		UnlockPDE(p4,p4e);
-		SE();
+		LF(rf);
 		free_area(thread,vaddr_start,allocated);
 		return -1;
 	}
@@ -1250,6 +1251,7 @@ static int free_area_4K(LPTHREAD thread,VADDR vaddr,u32 count){
 	LPPROCESS process;
 	int ret = 0;
 	u8 t_bit_map[(PAGE_ENT_MASK + 1)/8];
+	u64 rf;
 	
 	if(!count) return 0;
 	p4e = P4E(vaddr);
@@ -1269,19 +1271,19 @@ static int free_area_4K(LPTHREAD thread,VADDR vaddr,u32 count){
 		}
 	}
 	
-	SD(); LockPDE(p4,p4e);
+	SFI(rf); LockPDE(p4,p4e);
 	p3e = P3E(vaddr);
 	if(!(p4[p4e] & PAGE_EXIST)){
 		if(!(p4[p4e] & PAGE_ALLOCATED_MASK)){ 
 			UnlockPDE(p4,p4e); 
-			SE(); 
+			LF(rf); 
 			return -1; 
 		}
 		if(p4[p4e] & PAGE_BIT_MAP_MASK){
 			bit_map = PAGE2MAP(p4[p4e]);
 			if(!bt(bit_map,p3e)) { 
 				UnlockPDE(p4,p4e); 
-				SE(); 
+				LF(rf); 
 				return -1; 
 			}
 			p4[p4e] = get_free_page(0,0,0) | PAGE_BUSY_MASK;
@@ -1302,7 +1304,7 @@ static int free_area_4K(LPTHREAD thread,VADDR vaddr,u32 count){
 		if(!(p3[p3e] & PAGE_ALLOCATED_MASK)){ 
 			UnlockPDE(p4,p4e); 
 			UnlockPDE(p3,p3e); 
-			SE(); 
+			LF(rf); 
 			return -1; 
 		}
 		if(p3[p3e] & PAGE_BIT_MAP_MASK){
@@ -1310,7 +1312,7 @@ static int free_area_4K(LPTHREAD thread,VADDR vaddr,u32 count){
 			if(!bt(bit_map,p2e)) { 
 				UnlockPDE(p4,p4e); 
 				UnlockPDE(p3,p3e); 
-				SE(); 
+				LF(rf); 
 				return -1; 
 			}
 			p3[p3e] = get_free_page(0,0,0) | PAGE_BUSY_MASK;
@@ -1338,7 +1340,7 @@ static int free_area_4K(LPTHREAD thread,VADDR vaddr,u32 count){
 				UnlockPDE(p4,p4e); 
 				UnlockPDE(p3,p3e); 
 				UnlockPDE(p2,p2e); 
-				SE(); 
+				LF(rf); 
 				if(bit_map) kfree(bit_map); 
 				return ret;
 			}
@@ -1347,7 +1349,7 @@ static int free_area_4K(LPTHREAD thread,VADDR vaddr,u32 count){
 					UnlockPDE(p4,p4e); 
 					UnlockPDE(p3,p3e); 
 					UnlockPDE(p2,p2e); 
-					SE(); 
+					LF(rf); 
 					if(bit_map) kfree(bit_map); 
 					return ret;
 				}
@@ -1361,7 +1363,7 @@ static int free_area_4K(LPTHREAD thread,VADDR vaddr,u32 count){
 				UnlockPDE(p4,p4e); 
 				UnlockPDE(p3,p3e); 
 				UnlockPDE(p2,p2e); 
-				SE(); 
+				LF(rf); 
 				if(bit_map) kfree(bit_map); 
 				return ret;
 			}
@@ -1370,7 +1372,7 @@ static int free_area_4K(LPTHREAD thread,VADDR vaddr,u32 count){
 					UnlockPDE(p4,p4e); 
 					UnlockPDE(p3,p3e); 
 					UnlockPDE(p2,p2e); 
-					SE(); 
+					LF(rf); 
 					if(bit_map) kfree(bit_map); 
 					return ret;
 				}
@@ -1387,7 +1389,7 @@ static int free_area_4K(LPTHREAD thread,VADDR vaddr,u32 count){
 			memcpy(bit_map,t_bit_map,(PAGE_ENT_MASK + 1)/8);
 			p2[p2e] = (first << PAGE_FIRST_SHIFT) | ((u64)bit_map & PAGE_BIT_MAP_MASK) | PAGE_ALLOCATED_MASK;	
 			//UnlockPDE(p2,p2e);
-			SE(); return ret;
+			LF(rf); return ret;
 		}
 		//检测是否可以合并
 		for(i = 0;i < (PAGE_ENT_MASK + 1)/8;i++){
@@ -1399,7 +1401,7 @@ static int free_area_4K(LPTHREAD thread,VADDR vaddr,u32 count){
 			memcpy(bit_map,t_bit_map,(PAGE_ENT_MASK + 1)/8);
 			p2[p2e] = (first << PAGE_FIRST_SHIFT) | ((u64)bit_map & PAGE_BIT_MAP_MASK) | PAGE_ALLOCATED_MASK;	
 			//UnlockPDE(p2,p2e);
-			SE(); return ret;
+			LF(rf); return ret;
 		}
 		//可合并
 		p2[p2e] = 0;
@@ -1417,7 +1419,7 @@ static int free_area_4K(LPTHREAD thread,VADDR vaddr,u32 count){
 				UnlockPDE(p4,p4e); UnlockPDE(p3,p3e);
 				p2[p2e] = (first << PAGE_FIRST_SHIFT) | ((u64)bit_map & PAGE_BIT_MAP_MASK) | PAGE_ALLOCATED_MASK;	
 				//UnlockPDE(p2,p2e);
-				SE(); return ret;
+				LF(rf); return ret;
 			}
 			//检测是否可以合并
 			for(i = 0;i < (PAGE_ENT_MASK + 1)/8;i++){
@@ -1426,7 +1428,7 @@ static int free_area_4K(LPTHREAD thread,VADDR vaddr,u32 count){
 				UnlockPDE(p4,p4e); UnlockPDE(p3,p3e);
 				p2[p2e] = (first << PAGE_FIRST_SHIFT) | ((u64)bit_map & PAGE_BIT_MAP_MASK) | PAGE_ALLOCATED_MASK;	
 				//UnlockPDE(p2,p2e);
-				SE(); return ret;
+				LF(rf); return ret;
 			}
 			//可合并
 			p2[p2e] = 0;
@@ -1440,14 +1442,14 @@ static int free_area_4K(LPTHREAD thread,VADDR vaddr,u32 count){
 			while(count--) btr(bit_map,p1e++);
 			p2[p2e] = (first << PAGE_FIRST_SHIFT) | ((u64)bit_map & PAGE_BIT_MAP_MASK) | PAGE_ALLOCATED_MASK;
 			//UnlockPDE(p2,p2e);
-			SE(); return 0;
+			LF(rf); return 0;
 		}
 	}
 	else{ 
 		UnlockPDE(p2,p2e); 
 		UnlockPDE(p3,p3e); 
 		UnlockPDE(p4,p4e); 
-		SE(); 
+		LF(rf); 
 		if(bit_map) kfree(bit_map); 
 		return -1; 
 	}
@@ -1458,7 +1460,7 @@ static int free_area_4K(LPTHREAD thread,VADDR vaddr,u32 count){
 		if(p2[p2e] & PAGE_EXIST){ 
 			UnlockPDE(p4,p4e); 
 			UnlockPDE(p3,p3e); 
-			SE(); 
+			LF(rf); 
 			if(bit_map) kfree(bit_map); 
 			return ret;
 		}
@@ -1466,7 +1468,7 @@ static int free_area_4K(LPTHREAD thread,VADDR vaddr,u32 count){
 			if(p2[p2e] & SWAP_ID_MASK){ 
 				UnlockPDE(p4,p4e); 
 				UnlockPDE(p3,p3e); 
-				SE(); 
+				LF(rf); 
 				if(bit_map) kfree(bit_map); 
 				return ret; 
 			}
@@ -1479,7 +1481,7 @@ static int free_area_4K(LPTHREAD thread,VADDR vaddr,u32 count){
 		if(p2[p2e] & PAGE_EXIST){ 
 			UnlockPDE(p4,p4e); 
 			UnlockPDE(p3,p3e); 
-			SE(); 
+			LF(rf); 
 			if(bit_map) kfree(bit_map); 
 			return ret; 
 		}
@@ -1487,7 +1489,7 @@ static int free_area_4K(LPTHREAD thread,VADDR vaddr,u32 count){
 			if(p2[p2e] & SWAP_ID_MASK){ 
 				UnlockPDE(p4,p4e); 
 				UnlockPDE(p3,p3e); 
-				SE(); 
+				LF(rf); 
 				if(bit_map) kfree(bit_map); 
 				return ret; 
 			}
@@ -1503,7 +1505,7 @@ static int free_area_4K(LPTHREAD thread,VADDR vaddr,u32 count){
 		memcpy(bit_map,t_bit_map,(PAGE_ENT_MASK + 1)/8);
 		p3[p3e] = (first << PAGE_FIRST_SHIFT) | ((u64)bit_map & PAGE_BIT_MAP_MASK) | PAGE_ALLOCATED_MASK;	
 		//UnlockPDE(p3,p3e);
-		SE();
+		LF(rf);
 		return ret;
 	}
 	//检测是否可以合并
@@ -1515,7 +1517,7 @@ static int free_area_4K(LPTHREAD thread,VADDR vaddr,u32 count){
 		memcpy(bit_map,t_bit_map,(PAGE_ENT_MASK + 1)/8);
 		p3[p3e] = (first << PAGE_FIRST_SHIFT) | ((u64)bit_map & PAGE_BIT_MAP_MASK) | PAGE_ALLOCATED_MASK;	
 		//UnlockPDE(p3,p3e);
-		SE();
+		LF(rf);
 		return ret;
 	}
 	//可合并
@@ -1527,14 +1529,14 @@ static int free_area_4K(LPTHREAD thread,VADDR vaddr,u32 count){
 	for(p3e = 0;p3e <= PAGE_ENT_MASK;p3e++){
 		if(p3[p3e] & PAGE_EXIST){ 
 			UnlockPDE(p4,p4e); 
-			SE(); 
+			LF(rf); 
 			if(bit_map) kfree(bit_map); 
 			return ret;
 		}
 		if(p3[p3e] & PAGE_ALLOCATED_MASK){
 			if(p3[p3e] & SWAP_ID_MASK){ 
 				UnlockPDE(p4,p4e); 
-				SE(); 
+				LF(rf); 
 				if(bit_map) kfree(bit_map); 
 				return ret; 
 			}
@@ -1546,14 +1548,14 @@ static int free_area_4K(LPTHREAD thread,VADDR vaddr,u32 count){
 	for(;p3e <= PAGE_ENT_MASK;p3e++){
 		if(p3[p3e] & PAGE_EXIST){ 
 			UnlockPDE(p4,p4e); 
-			SE(); 
+			LF(rf); 
 			if(bit_map) kfree(bit_map); 
 			return ret; 
 		}
 		if(p3[p3e] & PAGE_ALLOCATED_MASK){
 			if(p3[p3e] & SWAP_ID_MASK){ 
 				UnlockPDE(p4,p4e); 
-				SE(); 
+				LF(rf); 
 				if(bit_map) kfree(bit_map); 
 				return ret; 
 			}
@@ -1568,7 +1570,7 @@ static int free_area_4K(LPTHREAD thread,VADDR vaddr,u32 count){
 		memcpy(bit_map,t_bit_map,(PAGE_ENT_MASK + 1)/8);
 		p4[p4e] = (first << PAGE_FIRST_SHIFT) | ((u64)bit_map & PAGE_BIT_MAP_MASK) | PAGE_ALLOCATED_MASK;	
 		//UnlockPDE(p3,p3e);
-		SE();
+		LF(rf);
 		return ret;
 	}
 	//检测是否可以合并
@@ -1579,13 +1581,13 @@ static int free_area_4K(LPTHREAD thread,VADDR vaddr,u32 count){
 		memcpy(bit_map,t_bit_map,(PAGE_ENT_MASK + 1)/8);
 		p4[p4e] = (first << PAGE_FIRST_SHIFT) | ((u64)bit_map & PAGE_BIT_MAP_MASK) | PAGE_ALLOCATED_MASK;	
 		//UnlockPDE(p3,p3e);
-		SE();
+		LF(rf);
 		return ret;
 	}
 	//可合并
 	p4[p4e] = 0;
 	//UnlockPDE(p4,p4e);
-	SE();
+	LF(rf);
 	if(bit_map) kfree(bit_map);
 	return ret;
 }
@@ -1597,6 +1599,7 @@ static int free_area_2M(LPTHREAD thread,VADDR vaddr,u32 count){
 	LPPROCESS process;
 	int ret = 0;
 	u8 t_bit_map[(PAGE_ENT_MASK + 1)/8];
+	u64 rf;
 	
 	if(!count) return 0;
 	p4e = P4E(vaddr);
@@ -1616,7 +1619,7 @@ static int free_area_2M(LPTHREAD thread,VADDR vaddr,u32 count){
 		}
 	}
 	
-	SD();
+	SFI(rf);
 	LockPDE(p4,p4e);
 	p3e = P3E(vaddr);
 	if(p4[p4e] & PAGE_EXIST) p3 = PADDR2V(p4[p4e]);
@@ -1625,7 +1628,7 @@ static int free_area_2M(LPTHREAD thread,VADDR vaddr,u32 count){
 			bit_map = PAGE2MAP(p4[p4e]);
 			if(!bt(bit_map,p3e)){
 				UnlockPDE(p4,p4e);
-				SE();
+				LF(rf);
 				return -1;
 			}
 			p4[p4e] = get_free_page(0,0,0) | PAGE_BUSY_MASK;
@@ -1664,7 +1667,7 @@ static int free_area_2M(LPTHREAD thread,VADDR vaddr,u32 count){
 			if(p2[p2e] & PAGE_EXIST){
 				UnlockPDE(p4,p4e); 
 				UnlockPDE(p3,p3e); 
-				SE(); 
+				LF(rf); 
 				if(bit_map) kfree(bit_map); 
 				return ret;
 			}
@@ -1672,7 +1675,7 @@ static int free_area_2M(LPTHREAD thread,VADDR vaddr,u32 count){
 				if(p2[p2e] & SWAP_ID_MASK){
 					UnlockPDE(p4,p4e); 
 					UnlockPDE(p3,p3e); 
-					SE(); 
+					LF(rf); 
 					if(bit_map) kfree(bit_map); 
 					return ret;
 				}
@@ -1685,7 +1688,7 @@ static int free_area_2M(LPTHREAD thread,VADDR vaddr,u32 count){
 			if(p2[p2e] & PAGE_EXIST){
 				UnlockPDE(p4,p4e); 
 				UnlockPDE(p3,p3e); 
-				SE(); 
+				LF(rf); 
 				if(bit_map) kfree(bit_map); 
 				return ret;
 			}
@@ -1693,7 +1696,7 @@ static int free_area_2M(LPTHREAD thread,VADDR vaddr,u32 count){
 				if(p2[p2e] & SWAP_ID_MASK){ 
 					UnlockPDE(p4,p4e); 
 					UnlockPDE(p3,p3e); 
-					SE(); 
+					LF(rf); 
 					if(bit_map) kfree(bit_map); 
 					return ret;
 				}
@@ -1709,7 +1712,7 @@ static int free_area_2M(LPTHREAD thread,VADDR vaddr,u32 count){
 			memcpy(bit_map,t_bit_map,(PAGE_ENT_MASK + 1)/8);
 			p3[p3e] = (first << PAGE_FIRST_SHIFT) | ((u64)bit_map & PAGE_BIT_MAP_MASK) | PAGE_ALLOCATED_MASK;	
 			//UnlockPDE(p3,p3e);
-			SE(); return ret;
+			LF(rf); return ret;
 		}
 		//检测是否可以合并
 		for(i = 0;i < (PAGE_ENT_MASK + 1)/8;i++){
@@ -1720,7 +1723,7 @@ static int free_area_2M(LPTHREAD thread,VADDR vaddr,u32 count){
 			memcpy(bit_map,t_bit_map,(PAGE_ENT_MASK + 1)/8);
 			p3[p3e] = (first << PAGE_FIRST_SHIFT) | ((u64)bit_map & PAGE_BIT_MAP_MASK) | PAGE_ALLOCATED_MASK;	
 			//UnlockPDE(p3,p3e);
-			SE(); return ret;
+			LF(rf); return ret;
 		}
 		//可合并
 		p3[p3e] = 0;
@@ -1738,7 +1741,7 @@ static int free_area_2M(LPTHREAD thread,VADDR vaddr,u32 count){
 				UnlockPDE(p4,p4e);
 				p3[p3e] = (first << PAGE_FIRST_SHIFT) | ((u64)bit_map & PAGE_BIT_MAP_MASK) | PAGE_ALLOCATED_MASK;	
 				//UnlockPDE(p3,p3e);
-				SE(); return ret;
+				LF(rf); return ret;
 			}
 			//检测是否可以合并
 			for(i = 0;i < (PAGE_ENT_MASK + 1)/8;i++){
@@ -1747,7 +1750,7 @@ static int free_area_2M(LPTHREAD thread,VADDR vaddr,u32 count){
 				UnlockPDE(p4,p4e);
 				p3[p3e] = (first << PAGE_FIRST_SHIFT) | ((u64)bit_map & PAGE_BIT_MAP_MASK) | PAGE_ALLOCATED_MASK;	
 				//UnlockPDE(p3,p3e);
-				SE(); return ret;
+				LF(rf); return ret;
 			}
 			//可合并
 			p3[p3e] = 0;
@@ -1761,13 +1764,13 @@ static int free_area_2M(LPTHREAD thread,VADDR vaddr,u32 count){
 			while(count--) btr(bit_map,p2e++);
 			p3[p3e] = (first << PAGE_FIRST_SHIFT) | ((u64)bit_map & PAGE_BIT_MAP_MASK) | PAGE_ALLOCATED_MASK;
 			//UnlockPDE(p3,p3e);
-			SE(); return 0;
+			LF(rf); return 0;
 		}
 	}
 	else{
 		UnlockPDE(p3,p3e); 
 		UnlockPDE(p4,p4e); 
-		SE(); 
+		LF(rf); 
 		if(bit_map) kfree(bit_map); 
 		return -1; 
 	}
@@ -1776,14 +1779,14 @@ static int free_area_2M(LPTHREAD thread,VADDR vaddr,u32 count){
 	for(p3e = 0;p3e <= PAGE_ENT_MASK;p3e++){
 		if(p3[p3e] & PAGE_EXIST){ 
 			UnlockPDE(p4,p4e); 
-			SE(); 
+			LF(rf); 
 			if(bit_map) kfree(bit_map); 
 			return ret;
 		}
 		if(p3[p3e] & PAGE_ALLOCATED_MASK){
 			if(p3[p3e] & SWAP_ID_MASK){ 
 				UnlockPDE(p4,p4e); 
-				SE(); 
+				LF(rf); 
 				if(bit_map) kfree(bit_map); 
 				return ret; 
 			}
@@ -1795,14 +1798,14 @@ static int free_area_2M(LPTHREAD thread,VADDR vaddr,u32 count){
 	for(;p3e <= PAGE_ENT_MASK;p3e++){
 		if(p3[p3e] & PAGE_EXIST){ 
 			UnlockPDE(p4,p4e); 
-			SE(); 
+			LF(rf); 
 			if(bit_map) kfree(bit_map); 
 			return ret; 
 		}
 		if(p3[p3e] & PAGE_ALLOCATED_MASK){
 			if(p3[p3e] & SWAP_ID_MASK){ 
 				UnlockPDE(p4,p4e); 
-				SE(); 
+				LF(rf); 
 				if(bit_map) kfree(bit_map); 
 				return ret; 
 			}
@@ -1817,7 +1820,7 @@ static int free_area_2M(LPTHREAD thread,VADDR vaddr,u32 count){
 		memcpy(bit_map,t_bit_map,(PAGE_ENT_MASK + 1)/8);
 		p4[p4e] = (first << PAGE_FIRST_SHIFT) | ((u64)bit_map & PAGE_BIT_MAP_MASK) | PAGE_ALLOCATED_MASK;	
 		//UnlockPDE(p3,p3e);
-		SE();
+		LF(rf);
 		return ret;
 	}
 	//检测是否可以合并
@@ -1828,13 +1831,13 @@ static int free_area_2M(LPTHREAD thread,VADDR vaddr,u32 count){
 		memcpy(bit_map,t_bit_map,(PAGE_ENT_MASK + 1)/8);
 		p4[p4e] = (first << PAGE_FIRST_SHIFT) | ((u64)bit_map & PAGE_BIT_MAP_MASK) | PAGE_ALLOCATED_MASK;	
 		//UnlockPDE(p3,p3e);
-		SE();
+		LF(rf);
 		return ret;
 	}
 	//可合并
 	p4[p4e] = 0;
 	//UnlockPDE(p4,p4e);
-	SE();
+	LF(rf);
 	if(bit_map) kfree(bit_map);
 	return ret;
 }
@@ -1846,6 +1849,7 @@ static int free_area_1G(LPTHREAD thread,VADDR vaddr,u32 count){
 	LPPROCESS process;
 	int ret = 0;
 	u8 t_bit_map[(PAGE_ENT_MASK + 1)/8];
+	u64 rf;
 	
 	if(!count) return 0;
 	p4e = P4E(vaddr);
@@ -1865,7 +1869,7 @@ static int free_area_1G(LPTHREAD thread,VADDR vaddr,u32 count){
 		}
 	}
 	
-	SD();
+	SFI(rf);
 	LockPDE(p4,p4e);  
 	p3e = P3E(vaddr);
 	if(p4[p4e] & PAGE_EXIST){
@@ -1904,14 +1908,14 @@ static int free_area_1G(LPTHREAD thread,VADDR vaddr,u32 count){
 		for(p3e = 0;p3e <= PAGE_ENT_MASK;p3e++){
 			if(p3[p3e] & PAGE_EXIST){
 				UnlockPDE(p4,p4e);  
-				SE(); 
+				LF(rf); 
 				if(bit_map) kfree(bit_map); 
 				return ret;
 			}
 			if(p3[p3e] & PAGE_ALLOCATED_MASK){
 				if(p3[p3e] & SWAP_ID_MASK){
 					UnlockPDE(p4,p4e); 
-					SE(); 
+					LF(rf); 
 					if(bit_map) kfree(bit_map); 
 					return ret;
 				}
@@ -1923,14 +1927,14 @@ static int free_area_1G(LPTHREAD thread,VADDR vaddr,u32 count){
 		for(;p3e <= PAGE_ENT_MASK;p3e++){
 			if(p3[p3e] & PAGE_EXIST){
 				UnlockPDE(p4,p4e); 
-				SE(); 
+				LF(rf); 
 				if(bit_map) kfree(bit_map); 
 				return ret;
 			}
 			if(p3[p3e] & PAGE_ALLOCATED_MASK){
 				if(p3[p3e] & SWAP_ID_MASK){ 
 					UnlockPDE(p4,p4e); 
-					SE(); 
+					LF(rf); 
 					if(bit_map) kfree(bit_map); 
 					return ret;
 				}
@@ -1945,7 +1949,7 @@ static int free_area_1G(LPTHREAD thread,VADDR vaddr,u32 count){
 			memcpy(bit_map,t_bit_map,(PAGE_ENT_MASK + 1)/8);
 			p4[p4e] = (first << PAGE_FIRST_SHIFT) | ((u64)bit_map & PAGE_BIT_MAP_MASK) | PAGE_ALLOCATED_MASK;	
 			//UnlockPDE(p4,p4e);
-			SE(); return ret;
+			LF(rf); return ret;
 		}
 		//检测是否可以合并
 		for(i = 0;i < (PAGE_ENT_MASK + 1)/8;i++){
@@ -1955,12 +1959,12 @@ static int free_area_1G(LPTHREAD thread,VADDR vaddr,u32 count){
 			memcpy(bit_map,t_bit_map,(PAGE_ENT_MASK + 1)/8);
 			p4[p4e] = (first << PAGE_FIRST_SHIFT) | ((u64)bit_map & PAGE_BIT_MAP_MASK) | PAGE_ALLOCATED_MASK;	
 			//UnlockPDE(p4,p4e);
-			SE(); return ret;
+			LF(rf); return ret;
 		}
 		//可合并
 		p4[p4e] = 0;
 		//UnlockPDE(p4,p4e);
-		SE();
+		LF(rf);
 		return ret;
 	}
 	else if(p4[p4e] & PAGE_ALLOCATED_MASK){
@@ -1973,7 +1977,7 @@ static int free_area_1G(LPTHREAD thread,VADDR vaddr,u32 count){
 				//不可以合并
 				p4[p4e] = (first << PAGE_FIRST_SHIFT) | ((u64)bit_map & PAGE_BIT_MAP_MASK) | PAGE_ALLOCATED_MASK;	
 				//UnlockPDE(p4,p4e);
-				SE(); return ret;
+				LF(rf); return ret;
 			}
 			//检测是否可以合并
 			for(i = 0;i < (PAGE_ENT_MASK + 1)/8;i++){
@@ -1981,12 +1985,12 @@ static int free_area_1G(LPTHREAD thread,VADDR vaddr,u32 count){
 				//不可以合并
 				p4[p4e] = (first << PAGE_FIRST_SHIFT) | ((u64)bit_map & PAGE_BIT_MAP_MASK) | PAGE_ALLOCATED_MASK;	
 				//UnlockPDE(p4,p4e);
-				SE(); return ret;
+				LF(rf); return ret;
 			}
 			//可合并
 			p4[p4e] = 0;
 			//UnlockPDE(p4,p4e);
-			SE();
+			LF(rf);
 			return ret;
 		}
 		else{
@@ -1996,12 +2000,12 @@ static int free_area_1G(LPTHREAD thread,VADDR vaddr,u32 count){
 			while(count--) btr(bit_map,p3e++);
 			p4[p4e] = (first << PAGE_FIRST_SHIFT) | ((u64)bit_map & PAGE_BIT_MAP_MASK) | PAGE_ALLOCATED_MASK;
 			//UnlockPDE(p4,p4e);
-			SE(); return 0;
+			LF(rf); return 0;
 		}
 	}
 	else{
 		UnlockPDE(p4,p4e); 
-		SE(); 
+		LF(rf); 
 		return -1; 
 	}
 }
@@ -2012,6 +2016,7 @@ int free_area(LPTHREAD thread,VADDR vaddr,size_t size){
 	u64 count;
 	LPPROCESS process;
 	int ret = 0;
+	u64 rf;
 	
 	if(!size) return 0;
 	start = (u64)vaddr & PAGE_PADDR_MASK_4K;
@@ -2067,7 +2072,7 @@ int free_area(LPTHREAD thread,VADDR vaddr,size_t size){
 				p4 = process->pdbe;
 			}
 		}
-		SD();
+		SFI(rf);
 		LockPDE(p4,p4e);
 		if(p4[p4e] & PAGE_EXIST){
 			p3 = PADDR2V(p4[p4e]);
@@ -2099,7 +2104,7 @@ int free_area(LPTHREAD thread,VADDR vaddr,size_t size){
 		else ret = -1;
 		p4[p4e] = 0;
 		//UnlockPDE(p4,p4e);
-		SE();
+		LF(rf);
 		size -= PAGE_SIZE_512G;
 		start = PAGE_SIZE_512G;
 	}
@@ -2133,6 +2138,7 @@ int free_vaddr(LPTHREAD thread,VADDR vaddr){
 	LPPROCESS process;
 	int ret = 0;
 	u8 t_bit_map[(PAGE_ENT_MASK + 1)/8];
+	u64 rf;
 	
 	p4e = P4E(vaddr);
 	if(p4e >= 256){
@@ -2150,20 +2156,20 @@ int free_vaddr(LPTHREAD thread,VADDR vaddr){
 			p4 = process->pdbe;
 		}
 	}
-	SD(); 
+	SFI(rf);
 	LockPDE(p4,p4e);
 	p3e = P3E(vaddr);
 	if(!(p4[p4e] & PAGE_EXIST)){
 		if(!(p4[p4e] & PAGE_ALLOCATED_MASK)){ 
 			UnlockPDE(p4,p4e); 
-			SE(); 
+			LF(rf); 
 			return -1; 
 		}
 		if(p4[p4e] & PAGE_BIT_MAP_MASK){
 			bit_map = PAGE2MAP(p4[p4e]);
 			if(!bt(bit_map,p3e)) { 
 				UnlockPDE(p4,p4e); 
-				SE(); 
+				LF(rf); 
 				return -1; 
 			}
 			p4[p4e] = get_free_page(0,0,0) | PAGE_BUSY_MASK;
@@ -2184,7 +2190,7 @@ int free_vaddr(LPTHREAD thread,VADDR vaddr){
 		if(!(p3[p3e] & PAGE_ALLOCATED_MASK)){ 
 			UnlockPDE(p4,p4e); 
 			UnlockPDE(p3,p3e); 
-			SE(); 
+			LF(rf); 
 			return -1; 
 		}
 		if(p3[p3e] & PAGE_BIT_MAP_MASK){
@@ -2192,7 +2198,7 @@ int free_vaddr(LPTHREAD thread,VADDR vaddr){
 			if(!bt(bit_map,p2e)) { 
 				UnlockPDE(p4,p4e); 
 				UnlockPDE(p3,p3e); 
-				SE(); 
+				LF(rf); 
 				return -1; 
 			}
 			p3[p3e] = get_free_page(0,0,0) | PAGE_BUSY_MASK;
@@ -2213,7 +2219,7 @@ int free_vaddr(LPTHREAD thread,VADDR vaddr){
 			UnlockPDE(p4,p4e); 
 			UnlockPDE(p3,p3e); 
 			UnlockPDE(p2,p2e); 
-			SE(); 
+			LF(rf); 
 			if(bit_map) kfree(bit_map); 
 			return -1;
 		}
@@ -2230,7 +2236,7 @@ int free_vaddr(LPTHREAD thread,VADDR vaddr){
 				UnlockPDE(p4,p4e); 
 				UnlockPDE(p3,p3e); 
 				UnlockPDE(p2,p2e); 
-				SE(); 
+				LF(rf); 
 				if(bit_map) kfree(bit_map); 
 				return 0;
 			}
@@ -2239,7 +2245,7 @@ int free_vaddr(LPTHREAD thread,VADDR vaddr){
 					UnlockPDE(p4,p4e); 
 					UnlockPDE(p3,p3e); 
 					UnlockPDE(p2,p2e); 
-					SE(); 
+					LF(rf); 
 					if(bit_map) kfree(bit_map); 
 					return 0;
 				}
@@ -2253,7 +2259,7 @@ int free_vaddr(LPTHREAD thread,VADDR vaddr){
 				UnlockPDE(p4,p4e); 
 				UnlockPDE(p3,p3e); 
 				UnlockPDE(p2,p2e); 
-				SE(); 
+				LF(rf); 
 				if(bit_map) kfree(bit_map); 
 				return 0;
 			}
@@ -2262,7 +2268,7 @@ int free_vaddr(LPTHREAD thread,VADDR vaddr){
 					UnlockPDE(p4,p4e); 
 					UnlockPDE(p3,p3e); 
 					UnlockPDE(p2,p2e); 
-					SE(); 
+					LF(rf); 
 					if(bit_map) kfree(bit_map); 
 					return 0;
 				}
@@ -2279,7 +2285,7 @@ int free_vaddr(LPTHREAD thread,VADDR vaddr){
 			memcpy(bit_map,t_bit_map,(PAGE_ENT_MASK + 1)/8);
 			p2[p2e] = (first << PAGE_FIRST_SHIFT) | ((u64)bit_map & PAGE_BIT_MAP_MASK) | PAGE_ALLOCATED_MASK;	
 			//UnlockPDE(p2,p2e);
-			SE(); return 0;
+			LF(rf); return 0;
 		}
 		//检测是否可以合并
 		for(i = 0;i < (PAGE_ENT_MASK + 1)/8;i++){
@@ -2291,7 +2297,7 @@ int free_vaddr(LPTHREAD thread,VADDR vaddr){
 			memcpy(bit_map,t_bit_map,(PAGE_ENT_MASK + 1)/8);
 			p2[p2e] = (first << PAGE_FIRST_SHIFT) | ((u64)bit_map & PAGE_BIT_MAP_MASK) | PAGE_ALLOCATED_MASK;	
 			//UnlockPDE(p2,p2e);
-			SE(); return 0;
+			LF(rf); return 0;
 		}
 		//可合并
 		p2[p2e] = 0;
@@ -2307,7 +2313,7 @@ int free_vaddr(LPTHREAD thread,VADDR vaddr){
 				UnlockPDE(p4,p4e); 
 				UnlockPDE(p3,p3e); 
 				UnlockPDE(p2,p2e); 
-				SE(); 
+				LF(rf); 
 				if(bit_map) kfree(bit_map); 
 				return -1;
 			}
@@ -2316,7 +2322,7 @@ int free_vaddr(LPTHREAD thread,VADDR vaddr){
 				UnlockPDE(p4,p4e); UnlockPDE(p3,p3e);
 				p2[p2e] = (first << PAGE_FIRST_SHIFT) | ((u64)bit_map & PAGE_BIT_MAP_MASK) | PAGE_ALLOCATED_MASK;	
 				//UnlockPDE(p2,p2e);
-				SE(); return ret;
+				LF(rf); return ret;
 			}
 			//检测是否可以合并
 			for(i = 0;i < (PAGE_ENT_MASK + 1)/8;i++){
@@ -2325,7 +2331,7 @@ int free_vaddr(LPTHREAD thread,VADDR vaddr){
 				UnlockPDE(p4,p4e); UnlockPDE(p3,p3e);
 				p2[p2e] = (first << PAGE_FIRST_SHIFT) | ((u64)bit_map & PAGE_BIT_MAP_MASK) | PAGE_ALLOCATED_MASK;	
 				//UnlockPDE(p2,p2e);
-				SE(); return ret;
+				LF(rf); return ret;
 			}
 			//可合并
 			p2[p2e] = 0;
@@ -2339,14 +2345,14 @@ int free_vaddr(LPTHREAD thread,VADDR vaddr){
 			btr(bit_map,p1e);
 			p2[p2e] = (first << PAGE_FIRST_SHIFT) | ((u64)bit_map & PAGE_BIT_MAP_MASK) | PAGE_ALLOCATED_MASK;
 			//UnlockPDE(p2,p2e);
-			SE(); return 0;
+			LF(rf); return 0;
 		}
 	}
 	else{ 
 		UnlockPDE(p2,p2e); 
 		UnlockPDE(p3,p3e); 
 		UnlockPDE(p4,p4e); 
-		SE(); 
+		LF(rf); 
 		if(bit_map) kfree(bit_map); 
 		return -1; 
 	}
@@ -2357,7 +2363,7 @@ int free_vaddr(LPTHREAD thread,VADDR vaddr){
 		if(p2[p2e] & PAGE_EXIST){ 
 			UnlockPDE(p4,p4e); 
 			UnlockPDE(p3,p3e); 
-			SE(); 
+			LF(rf); 
 			if(bit_map) kfree(bit_map); 
 			return ret;
 		}
@@ -2365,7 +2371,7 @@ int free_vaddr(LPTHREAD thread,VADDR vaddr){
 			if(p2[p2e] & SWAP_ID_MASK){ 
 				UnlockPDE(p4,p4e); 
 				UnlockPDE(p3,p3e); 
-				SE(); 
+				LF(rf); 
 				if(bit_map) kfree(bit_map); 
 				return ret; 
 			}
@@ -2378,7 +2384,7 @@ int free_vaddr(LPTHREAD thread,VADDR vaddr){
 		if(p2[p2e] & PAGE_EXIST){ 
 			UnlockPDE(p4,p4e); 
 			UnlockPDE(p3,p3e); 
-			SE(); 
+			LF(rf); 
 			if(bit_map) kfree(bit_map); 
 			return ret; 
 		}
@@ -2386,7 +2392,7 @@ int free_vaddr(LPTHREAD thread,VADDR vaddr){
 			if(p2[p2e] & SWAP_ID_MASK){ 
 				UnlockPDE(p4,p4e); 
 				UnlockPDE(p3,p3e); 
-				SE(); 
+				LF(rf); 
 				if(bit_map) kfree(bit_map); 
 				return ret; 
 			}
@@ -2402,7 +2408,7 @@ int free_vaddr(LPTHREAD thread,VADDR vaddr){
 		memcpy(bit_map,t_bit_map,(PAGE_ENT_MASK + 1)/8);
 		p3[p3e] = (first << PAGE_FIRST_SHIFT) | ((u64)bit_map & PAGE_BIT_MAP_MASK) | PAGE_ALLOCATED_MASK;	
 		//UnlockPDE(p3,p3e);
-		SE();
+		LF(rf);
 		return ret;
 	}
 	//检测是否可以合并
@@ -2414,7 +2420,7 @@ int free_vaddr(LPTHREAD thread,VADDR vaddr){
 		memcpy(bit_map,t_bit_map,(PAGE_ENT_MASK + 1)/8);
 		p3[p3e] = (first << PAGE_FIRST_SHIFT) | ((u64)bit_map & PAGE_BIT_MAP_MASK) | PAGE_ALLOCATED_MASK;	
 		//UnlockPDE(p3,p3e);
-		SE();
+		LF(rf);
 		return ret;
 	}
 	//可合并
@@ -2426,14 +2432,14 @@ int free_vaddr(LPTHREAD thread,VADDR vaddr){
 	for(p3e = 0;p3e <= PAGE_ENT_MASK;p3e++){
 		if(p3[p3e] & PAGE_EXIST){ 
 			UnlockPDE(p4,p4e); 
-			SE(); 
+			LF(rf); 
 			if(bit_map) kfree(bit_map); 
 			return ret;
 		}
 		if(p3[p3e] & PAGE_ALLOCATED_MASK){
 			if(p3[p3e] & SWAP_ID_MASK){ 
 				UnlockPDE(p4,p4e); 
-				SE(); 
+				LF(rf); 
 				if(bit_map) kfree(bit_map); 
 				return ret; 
 			}
@@ -2445,14 +2451,14 @@ int free_vaddr(LPTHREAD thread,VADDR vaddr){
 	for(;p3e <= PAGE_ENT_MASK;p3e++){
 		if(p3[p3e] & PAGE_EXIST){ 
 			UnlockPDE(p4,p4e); 
-			SE(); 
+			LF(rf); 
 			if(bit_map) kfree(bit_map); 
 			return ret; 
 		}
 		if(p3[p3e] & PAGE_ALLOCATED_MASK){
 			if(p3[p3e] & SWAP_ID_MASK){ 
 				UnlockPDE(p4,p4e); 
-				SE(); 
+				LF(rf); 
 				if(bit_map) kfree(bit_map); 
 				return ret; 
 			}
@@ -2467,7 +2473,7 @@ int free_vaddr(LPTHREAD thread,VADDR vaddr){
 		memcpy(bit_map,t_bit_map,(PAGE_ENT_MASK + 1)/8);
 		p4[p4e] = (first << PAGE_FIRST_SHIFT) | ((u64)bit_map & PAGE_BIT_MAP_MASK) | PAGE_ALLOCATED_MASK;	
 		//UnlockPDE(p3,p3e);
-		SE();
+		LF(rf);
 		return ret;
 	}
 	//检测是否可以合并
@@ -2478,13 +2484,13 @@ int free_vaddr(LPTHREAD thread,VADDR vaddr){
 		memcpy(bit_map,t_bit_map,(PAGE_ENT_MASK + 1)/8);
 		p4[p4e] = (first << PAGE_FIRST_SHIFT) | ((u64)bit_map & PAGE_BIT_MAP_MASK) | PAGE_ALLOCATED_MASK;	
 		//UnlockPDE(p3,p3e);
-		SE();
+		LF(rf);
 		return ret;
 	}
 	//可合并
 	p4[p4e] = 0;
 	//UnlockPDE(p4,p4e);
-	SE();
+	LF(rf);
 	if(bit_map) kfree(bit_map);
 	return ret;
 }
@@ -2493,7 +2499,8 @@ int addr_vaild(LPTHREAD thread,VADDR addr){
 	u64 * p4,* p3,* p2,* p1;
 	u32 p4e,p3e,p2e,p1e;
 	LPPROCESS process = NULL;
-	
+	u64 rf;
+
 	p4e = P4E(addr);
 	if(p4e >= 256){
 		if(p4e > MAX_P4E){
@@ -2512,20 +2519,22 @@ int addr_vaild(LPTHREAD thread,VADDR addr){
 			p4 = process->pdbe;
 		}
 	}
-	ID();
+	SFI(rf);
 	LockPDE(p4,p4e);
 	p3e = P3E(addr);
 	if(!(p4[p4e] & PAGE_EXIST)){
 		if(pg_ext_test(p4 + p4e,p3e)) {
 			UnlockPDE(p4,p4e);
+			LF(rf);
 			return 1;
 		}
 		UnlockPDE(p4,p4e);
+		LF(rf);
 		return 0;
 	}
 	if(!(p4[p4e] & PAGE_EXIST)){
 		UnlockPDE(p4,p4e);
-		IE();
+		LF(rf);
 		return 0;
 	}
 	p3 = PADDR2V(p4[p4e]);
@@ -2535,14 +2544,16 @@ int addr_vaild(LPTHREAD thread,VADDR addr){
 	if(!(p3[p3e] & PAGE_EXIST)) {
 		if(pg_ext_test(p3 + p3e,p2e)) {
 			UnlockPDE(p3,p3e);
+			LF(rf);
 			return 1;
 		}
 		UnlockPDE(p3,p3e);
+		LF(rf);
 		return 0;
 	}
 	if(p3[p3e] & PAGE_BIG) {
 		UnlockPDE(p3,p3e);
-		IE();
+		LF(rf);
 		return 1;
 	}
 	p2 = PADDR2V(p3[p3e]);
@@ -2552,25 +2563,27 @@ int addr_vaild(LPTHREAD thread,VADDR addr){
 	if(!(p2[p2e] & PAGE_EXIST)){
 		if(pg_ext_test(p2 + p2e,p1e)) {
 			UnlockPDE(p2,p2e);
+			LF(rf);
 			return 1;
 		}
 		UnlockPDE(p2,p2e);
+		LF(rf);
 		return 0;
 	}
 	if(p2[p2e] & PAGE_BIG) {
 		UnlockPDE(p2,p2e);
-		IE();
+		LF(rf);
 		return 1;
 	}
 	p1 = PADDR2V(p2[p2e]); p1e = P1E(addr);
 	LockPDE(p1,p1e); UnlockPDE(p2,p2e);
 	if(p1[p1e] & PAGE_EXIST || p1[p1e] & PAGE_ALLOCATED_MASK){
 		UnlockPDE(p1,p1e);
-		IE();
+		LF(rf);
 		return 1;
 	}
 	UnlockPDE(p1,p1e);
-	IE();
+	LF(rf);
 	return 0;
 }
 //虚拟地址转换为物理地址
@@ -2579,6 +2592,7 @@ PADDR ADDRV2P(LPTHREAD thread,VADDR addr){
 	u32 p4e,p3e,p2e,p1e;
 	LPPROCESS process = NULL;
 	PADDR paddr;
+	u64 rf;
 	
 	p4e = P4E(addr);
 	if(p4e >= 256){
@@ -2598,30 +2612,30 @@ PADDR ADDRV2P(LPTHREAD thread,VADDR addr){
 			p4 = process->pdbe;
 		}
 	}
-	ID();
+	SFI(rf);
 	LockPDE(p4,p4e);
 	if(!(p4[p4e] & PAGE_EXIST)){
-		UnlockPDE(p4,p4e); IE(); return 0;
+		UnlockPDE(p4,p4e); LF(rf); return 0;
 	}
 	p3 = PADDR2V(p4[p4e]); p3e = P3E(addr);
 	LockPDE(p3,p3e); UnlockPDE(p4,p4e);
 	if(!(p3[p3e] & PAGE_EXIST)) {
-		UnlockPDE(p3,p3e); IE(); return 0;
+		UnlockPDE(p3,p3e); LF(rf); return 0;
 	}
 	if(p3[p3e] & PAGE_BIG) {
 		paddr = p3[p3e] & PAGE_PADDR_MASK_1G;
-		UnlockPDE(p3,p3e); IE();
+		UnlockPDE(p3,p3e); LF(rf);
 		paddr |= ((PADDR)addr) & PAGE_IN_ADDR_MASK_1G;
 		return paddr;
 	}
 	p2 = PADDR2V(p3[p3e]); p2e = P2E(addr);
 	LockPDE(p2,p2e); UnlockPDE(p3,p3e);
 	if(!(p2[p2e] & PAGE_EXIST)){
-		UnlockPDE(p2,p2e); IE(); return 0;
+		UnlockPDE(p2,p2e); LF(rf); return 0;
 	}
 	if(p2[p2e] & PAGE_BIG) {
 		paddr = p2[p2e] & PAGE_PADDR_MASK_2M;
-		UnlockPDE(p2,p2e); IE();
+		UnlockPDE(p2,p2e); LF(rf);
 		paddr |= ((PADDR)addr) & PAGE_IN_ADDR_MASK_2M;
 		return paddr;
 	}
@@ -2629,12 +2643,12 @@ PADDR ADDRV2P(LPTHREAD thread,VADDR addr){
 	LockPDE(p1,p1e); UnlockPDE(p2,p2e);
 	if(p1[p1e] & PAGE_EXIST) {
 		paddr = p1[p1e] & PAGE_PADDR_MASK_4K;
-		UnlockPDE(p1,p1e); IE();
+		UnlockPDE(p1,p1e); LF(rf);
 		paddr |= ((PADDR)addr) & PAGE_IN_ADDR_MASK_4K;
 		return paddr;
 	}
 	UnlockPDE(p1,p1e);
-	IE();
+	LF(rf);
 	return 0;
 }
 //映射指定页（包含属性位）到虚拟地址
@@ -2862,6 +2876,7 @@ PAGEE get_page(LPTHREAD thread,VADDR addr){
 	u32 p4e,p3e,p2e,p1e;
 	LPPROCESS process = NULL;
 	PAGEE page;
+	u64 rf;
 	
 	p4e = P4E(addr);
 	if(p4e >= 256){
@@ -2881,16 +2896,16 @@ PAGEE get_page(LPTHREAD thread,VADDR addr){
 			p4 = process->pdbe;
 		}
 	}
-	ID();
+	SFI(rf);
 	LockPDE(p4,p4e);
 	if(!(p4[p4e] & PAGE_EXIST)){
 		if(p4[p4e] & PAGE_ALLOCATED_MASK){
 			UnlockPDE(p4,p4e);
-			IE();
+			LF(rf);
 			return PAGE_ALLOCATED_MASK;
 		}
 		UnlockPDE(p4,p4e);
-		IE();
+		LF(rf);
 		return -1;
 	}
 	p3 = PADDR2V(p4[p4e]); p3e = P3E(addr);
@@ -2898,17 +2913,17 @@ PAGEE get_page(LPTHREAD thread,VADDR addr){
 	if(!(p3[p3e] & PAGE_EXIST)){
 		if(p3[p3e] & PAGE_ALLOCATED_MASK){
 			UnlockPDE(p3,p3e);
-			IE();
+			LF(rf);
 			return PAGE_ALLOCATED_MASK;
 		}
 		UnlockPDE(p3,p3e);
-		IE();
+		LF(rf);
 		return -1;
 	}
 	else if(p3[p3e] & PAGE_BIG) {
 		page = p3[p3e];
 		UnlockPDE(p3,p3e);
-		IE();
+		LF(rf);
 		return page;
 	}
 	p2 = PADDR2V(p3[p3e]); p2e = P2E(addr);
@@ -2916,17 +2931,17 @@ PAGEE get_page(LPTHREAD thread,VADDR addr){
 	if(!(p2[p2e] & PAGE_EXIST)){
 		if(p2[p2e] & PAGE_ALLOCATED_MASK){
 			UnlockPDE(p2,p2e);
-			IE();
+			LF(rf);
 			return PAGE_ALLOCATED_MASK;
 		}
 		UnlockPDE(p2,p2e);
-		IE();
+		LF(rf);
 		return -1;
 	}
 	else if(p2[p2e] & PAGE_BIG) {
 		page = p2[p2e];
 		UnlockPDE(p2,p2e);
-		IE();
+		LF(rf);
 		return page;
 	}
 	p1 = PADDR2V(p2[p2e]); p1e = P1E(addr);
@@ -2943,6 +2958,7 @@ int page_unswapable(LPTHREAD thread,VADDR vaddr,size_t size){
 	LPPROCESS process = NULL;
 	PAGEE page;
 	u64 user_mode = 0;
+	u64 rf;
 	
 	start = (u64)vaddr & PAGE_PADDR_MASK;
 	end = (VADDR)(((u64)vaddr + size + PAGE_SIZE - 1) & PAGE_PADDR_MASK);
@@ -2963,25 +2979,25 @@ int page_unswapable(LPTHREAD thread,VADDR vaddr,size_t size){
 			if(p4e == USER_STACK_P4E_INDEX) p4 = (&(thread->user_stack_p4e)) - USER_STACK_P4E_INDEX;
 			else p4 = process->pdbe;
 		}
-		ID();
+		SFI(rf);
 		LockPDE(p4,p4e);
 		p3e = P3E(start);
 		if(!(p4[p4e] & PAGE_EXIST) && pg_ext_test_and_depress(p4+p4e,p3e,user_mode)){
 			UnlockPDE(p4,p4e);
-			IE();
+			LF(rf);
 			return -1;
 		}
 		p3 = PADDR2V(p4[p4e]); p2e = P2E(start);
 		LockPDE(p3,p3e); UnlockPDE(p4,p4e);
 		if(!(p3[p3e] & PAGE_EXIST) && pg_ext_test_and_depress(p3+p2e,p2e,user_mode)){
 			UnlockPDE(p3,p3e);
-			IE();
+			LF(rf);
 			return -1;
 		}
 		if(p3[p3e] & PAGE_BIG) {
 			p3[p3e] |= PAGE_PWT | PAGE_PCD;
 			UnlockPDE(p3,p3e);
-			IE();
+			LF(rf);
 			start = (VADDR)((u64)start + PAGE_SIZE_1G);
 			continue;
 		}
@@ -2989,13 +3005,13 @@ int page_unswapable(LPTHREAD thread,VADDR vaddr,size_t size){
 		LockPDE(p2,p2e); UnlockPDE(p3,p3e);
 		if(!(p2[p2e] & PAGE_EXIST) && pg_ext_test_and_depress(p2+p2e,p1e,user_mode)){
 			UnlockPDE(p2,p2e);
-			IE();
+			LF(rf);
 			return -1;
 		}
 		if(p2[p2e] & PAGE_BIG) {
 			p2[p2e] |= PAGE_PWT | PAGE_PCD;
 			UnlockPDE(p2,p2e);
-			IE();
+			LF(rf);
 			start = (VADDR)((u64)start + PAGE_SIZE_2M);
 			continue;
 		}
@@ -3005,7 +3021,7 @@ int page_unswapable(LPTHREAD thread,VADDR vaddr,size_t size){
 		if(p1[p1e] & PAGE_EXIST){
 			p1[p1e] |= PAGE_PWT | PAGE_PCD;
 			UnlockPDE(p1,p1e);
-			IE();
+			LF(rf);
 			start = (VADDR)((u64)start + PAGE_SIZE_4K);
 			continue;
 		}
@@ -3019,7 +3035,7 @@ int page_unswapable(LPTHREAD thread,VADDR vaddr,size_t size){
 					page |= PAGE_EXIST;
 					p1[p1e] = page;
 					//UnlockPDE(p1,p1e);
-					IE();
+					LF(rf);
 					swap_in((swapid & SWAP_ID_MASK) >>  PAGE_SHIFT_1,page);
 				}
 				else{
@@ -3029,14 +3045,14 @@ int page_unswapable(LPTHREAD thread,VADDR vaddr,size_t size){
 					page |= PAGE_EXIST;
 					p1[p1e] = page;
 					//UnlockPDE(p1,p1e);
-					IE();
+					LF(rf);
 				}
 				start = (VADDR)((u64)start + PAGE_SIZE_4K);
 				continue;
 			}
 			else{
 				UnlockPDE(p1,p1e);
-				IE();
+				LF(rf);
 				return -1;
 			}
 		}
@@ -3052,6 +3068,7 @@ int page_swapable(LPTHREAD thread,VADDR vaddr,size_t size){
 	LPPROCESS process = NULL;
 	PAGEE page;
 	u64 user_mode;
+	u64 rf;
 	
 	start = (u64)vaddr & PAGE_PADDR_MASK;
 	end = (VADDR)(((u64)vaddr + size + PAGE_SIZE - 1) & PAGE_PADDR_MASK);
@@ -3072,25 +3089,25 @@ int page_swapable(LPTHREAD thread,VADDR vaddr,size_t size){
 			if(p4e == USER_STACK_P4E_INDEX) p4 = (&(thread->user_stack_p4e)) - USER_STACK_P4E_INDEX;
 			else p4 = process->pdbe;
 		}
-		ID();
+		SFI(rf);
 		LockPDE(p4,p4e);p3e = P3E(start);
 		if(!(p4[p4e] & PAGE_EXIST) && pg_ext_test_and_depress(p4+p4e,p3e,user_mode)){
 			UnlockPDE(p4,p4e);
-			IE();
+			LF(rf);
 			return -1;
 		}
 		p3 = PADDR2V(p4[p4e]); p2e = P2E(start);
 		LockPDE(p3,p3e); UnlockPDE(p4,p4e);
 		if((!(p3[p3e] & PAGE_EXIST) && pg_ext_test_and_depress(p3+p3e,p2e,user_mode)) || p3[p3e] & PAGE_BIG) {
 			UnlockPDE(p3,p3e);
-			IE();
+			LF(rf);
 			return -1;
 		}
 		p2 = PADDR2V(p3[p3e]); 
 		LockPDE(p2,p2e); UnlockPDE(p3,p3e);p1e = P1E(start);
 		if((!(p2[p2e] & PAGE_EXIST) && pg_ext_test_and_depress(p2+p2e,p1e,user_mode)) || p2[p2e] & PAGE_BIG) {
 			UnlockPDE(p2,p2e);
-			IE();
+			LF(rf);
 			return -1;
 		}
 		p1 = PADDR2V(p2[p2e]); 
@@ -3099,13 +3116,13 @@ int page_swapable(LPTHREAD thread,VADDR vaddr,size_t size){
 		if(p1[p1e] & PAGE_EXIST){
 			p1[p1e] |= PAGE_PWT | PAGE_PCD;
 			UnlockPDE(p1,p1e);
-			IE();
+			LF(rf);
 			start = (VADDR)((u64)start + PAGE_SIZE_4K);
 			continue;
 		}
 		else{
 			UnlockPDE(p1,p1e);
-			IE();
+			LF(rf);
 			return -1;
 		}
 	}
@@ -3138,6 +3155,7 @@ int page_uncacheable(LPTHREAD thread,VADDR vaddr,size_t size){
 	LPPROCESS process = NULL;
 	PAGEE page;
 	u64 user_mode;
+	u64 rf;
 	
 	start = (u64)vaddr & PAGE_PADDR_MASK;
 	end = (VADDR)(((u64)vaddr + size + PAGE_SIZE - 1) & PAGE_PADDR_MASK);
@@ -3162,25 +3180,25 @@ int page_uncacheable(LPTHREAD thread,VADDR vaddr,size_t size){
 				p4 = process->pdbe;
 			}
 		}
-		ID();
+		SFI(rf);
 		//asm("cli\n\thlt"::"a"(p4),"c"(p4e));
 		LockPDE(p4,p4e); p3e = P3E(start);
 		if(!(p4[p4e] & PAGE_EXIST) && pg_ext_test_and_depress(p4+p4e,p3e,user_mode)){
 			UnlockPDE(p4,p4e);
-			IE();
+			LF(rf);
 			return -1;
 		}
 		p3 = PADDR2V(p4[p4e]); p2e = P2E(start);
 		LockPDE(p3,p3e); UnlockPDE(p4,p4e);
 		if(!(p3[p3e] & PAGE_EXIST) && pg_ext_test_and_depress(p3+p3e,p2e,user_mode)){
 			UnlockPDE(p3,p3e);
-			IE();
+			LF(rf);
 			return -1;
 		}
 		if(p3[p3e] & PAGE_BIG) {
 			p3[p3e] |= PAGE_PWT | PAGE_PCD;
 			UnlockPDE(p3,p3e);
-			IE();
+			LF(rf);
 			start = (VADDR)((u64)start + PAGE_SIZE_1G);
 			continue;
 		}
@@ -3188,13 +3206,13 @@ int page_uncacheable(LPTHREAD thread,VADDR vaddr,size_t size){
 		LockPDE(p2,p2e); UnlockPDE(p3,p3e);
 		if(!(p2[p2e] & PAGE_EXIST) && pg_ext_test_and_depress(p2+p2e,p1e,user_mode)){
 			UnlockPDE(p2,p2e);
-			IE();
+			LF(rf);
 			return -1;
 		}
 		if(p2[p2e] & PAGE_BIG) {
 			p2[p2e] |= PAGE_PWT | PAGE_PCD;
 			UnlockPDE(p2,p2e);
-			IE();
+			LF(rf);
 			start = (VADDR)((u64)start + PAGE_SIZE_2M);
 			continue;
 		}
@@ -3204,7 +3222,7 @@ int page_uncacheable(LPTHREAD thread,VADDR vaddr,size_t size){
 		if(p1[p1e] & PAGE_EXIST){
 			p1[p1e] |= PAGE_PWT | PAGE_PCD;
 			UnlockPDE(p1,p1e);
-			IE();
+			LF(rf);
 			start = (VADDR)((u64)start + PAGE_SIZE_4K);
 			continue;
 		}
@@ -3216,7 +3234,7 @@ int page_uncacheable(LPTHREAD thread,VADDR vaddr,size_t size){
 			if(p1[p1e] & PAGE_ALLOCATED_MASK){
 				swap_id = p1[p1e];
 				p1[p1e] = page;
-				IE();
+				LF(rf);
 				if(swap_id & SWAP_ID_MASK){
 					swap_id &= SWAP_ID_MASK;
 					swap_id >>= PAGE_SHIFT_1;
@@ -3230,7 +3248,7 @@ int page_uncacheable(LPTHREAD thread,VADDR vaddr,size_t size){
 			}
 			else{
 				UnlockPDE(p1,p1e);
-				IE();
+				LF(rf);
 				return -1;
 			}
 		}
@@ -3246,6 +3264,7 @@ int page_cacheable(LPTHREAD thread,VADDR vaddr,size_t size){
 	LPPROCESS process = NULL;
 	PAGEE page;
 	u64 user_mode = 0;
+	u64 rf;
 	
 	start = (u64)vaddr & PAGE_PADDR_MASK;
 	end = (VADDR)(((u64)vaddr + size + PAGE_SIZE - 1) & PAGE_PADDR_MASK);
@@ -3265,24 +3284,24 @@ int page_cacheable(LPTHREAD thread,VADDR vaddr,size_t size){
 			if(p4e == USER_STACK_P4E_INDEX) p4 = (&(thread->user_stack_p4e)) - USER_STACK_P4E_INDEX;
 			else p4 = process->pdbe;
 		}
-		ID();
+		SFI(rf);
 		LockPDE(p4,p4e);p3e = P3E(start);
 		if(!(p4[p4e] & PAGE_EXIST) && pg_ext_test_and_depress(p4+p4e,p3e,user_mode)){
 			UnlockPDE(p4,p4e);
-			IE();
+			LF(rf);
 			return -1;
 		}
 		p3 = PADDR2V(p4[p4e]); p2e = P2E(start);
 		LockPDE(p3,p3e); UnlockPDE(p4,p4e);
 		if(!(p3[p3e] & PAGE_EXIST) && pg_ext_test_and_depress(p3+p3e,p2e,user_mode)){
 			UnlockPDE(p3,p3e);
-			IE();
+			LF(rf);
 			return -1;
 		}
 		if(p3[p3e] & PAGE_BIG) {
 			p3[p3e] &= ~(PAGE_PWT | PAGE_PCD);
 			UnlockPDE(p3,p3e);
-			IE();
+			LF(rf);
 			start = (VADDR)((u64)start + PAGE_SIZE_1G);
 			continue;
 		}
@@ -3290,13 +3309,13 @@ int page_cacheable(LPTHREAD thread,VADDR vaddr,size_t size){
 		LockPDE(p2,p2e); UnlockPDE(p3,p3e); p1e = P1E(start);
 		if(!(p2[p2e] & PAGE_EXIST) && pg_ext_test_and_depress(p2+p2e,p1e,user_mode)){
 			UnlockPDE(p2,p2e);
-			IE();
+			LF(rf);
 			return -1;
 		}
 		if(p2[p2e] & PAGE_BIG) {
 			p2[p2e] &= ~(PAGE_PWT | PAGE_PCD);
 			UnlockPDE(p2,p2e);
-			IE();
+			LF(rf);
 			start = (VADDR)((u64)start + PAGE_SIZE_2M);
 			continue;
 		}
@@ -3306,7 +3325,7 @@ int page_cacheable(LPTHREAD thread,VADDR vaddr,size_t size){
 		if(p1[p1e] & PAGE_EXIST){
 			p1[p1e] &= ~(PAGE_PWT | PAGE_PCD | PAGE_BUSY_MASK);
 			//UnlockPDE(p1,p1e);
-			IE();
+			LF(rf);
 			if(p4e >= 256 || 
 				(p4e == USER_STACK_P4E_INDEX && thread == GetCurThread()) ||
 				(process && process == GetCurProcess())) invtlb(start);
@@ -3315,7 +3334,7 @@ int page_cacheable(LPTHREAD thread,VADDR vaddr,size_t size){
 		}
 		else{
 			UnlockPDE(p1,p1e);
-			IE();
+			LF(rf);
 			return -1;
 		}
 	}
@@ -3406,6 +3425,7 @@ int paging_fault(struct _REG_STATUS_ * reg){
 	u32 i;
 	u64 swap_id;
 	u64 user_mode = 0;
+	u64 rf;
 	
 /*
 bit0:P:		0:non-present page
@@ -3451,12 +3471,12 @@ bit4:I/D:	0:not instruction
 				return 0;
 			}
 		}
-		ID();
+		SFI(rf);
 		LockPDE(p4,p4e);
 		p3e = P3E(addr);
 		if(!(p4[p4e] & PAGE_EXIST) && pg_ext_test_and_depress(p4+p4e,p3e,user_mode)){
 			UnlockPDE(p4,p4e);
-			IE();
+			LF(rf);
 			paging_panic(reg,addr);
 			return 0;
 		}
@@ -3466,7 +3486,7 @@ bit4:I/D:	0:not instruction
 		p2e = P2E(addr);
 		if(!(p3[p3e] & PAGE_EXIST) && pg_ext_test_and_depress(p3+p3e,p2e,user_mode)){
 			UnlockPDE(p3,p3e);
-			IE();
+			LF(rf);
 			paging_panic(reg,addr);
 			return 0;
 		}
@@ -3476,7 +3496,7 @@ bit4:I/D:	0:not instruction
 		p1e = P1E(addr);
 		if(!(p2[p2e] & PAGE_EXIST) && pg_ext_test_and_depress(p2+p2e,p1e,user_mode)){
 			UnlockPDE(p2,p2e);
-			IE();
+			LF(rf);
 			paging_panic(reg,addr);
 			return 0;
 		}
@@ -3489,7 +3509,7 @@ bit4:I/D:	0:not instruction
 				page = __get_free_page(0) | PAGE_EXIST | PAGE_WRITE | user_mode;
 				p1[p1e] = page;
 				//UnlockPDE(p1,p1e);
-				IE();
+				LF(rf);
 				swap_id &= SWAP_ID_MASK;
 				swap_id >>= PAGE_SHIFT_1;
 				if(swap_id){
@@ -3499,14 +3519,14 @@ bit4:I/D:	0:not instruction
 			}
 			else{
 				UnlockPDE(p1,p1e);
-				IE();
+				LF(rf);
 				paging_panic(reg,addr);
 				return 0;
 			}
 		}
 		else{
 			UnlockPDE(p1,p1e);
-			IE();
+			LF(rf);
 			paging_panic(reg,addr);
 			return 0;
 		}

@@ -367,6 +367,9 @@
 #define IA32_KERNEL_GS_BASE				0XC0000102
 #define IA32_TSC_AUX					0XC0000103
 
+#define GATE_TYPE_INT	0x0e
+#define GATE_TYPE_TRAP	0x0f
+
 struct _REG_STATUS_ {
 	u64 rax,rcx,rdx,rbx,err_code,rbp,rsi,rdi;
 	u64 r8,r9,r10,r11,r12,r13,r14,r15;
@@ -392,7 +395,6 @@ struct _PRIVATE_DATA_ {
 	u32 cpu_lock;
 	u32 flags;
 	u32 schedule_disable_count;
-	u32 int_disable_count;
 	int need_schedule;
 	struct _PROCESS_ * cur_process;
 	struct _THREAD_ * cur_thread;

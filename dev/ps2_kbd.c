@@ -26,6 +26,7 @@
 #include <kernel.h>
 #include <gst.h>
 #include <mm.h>
+#include <eisa.h>
 
 #define KEY_CAPS_LOCK_DOWN		1
 #define KEY_NUM_LOCK_DOWN		2
@@ -91,8 +92,7 @@ static int ps2_kbd_handle(int irq){
 	static u8 scan_code[8];
 	static u8 status2 = 0;
 	
-	tmp = inb(0x60);
-	//printk("%02X.",tmp);
+	tmp = inb(EISA_KBD_DATA_PORT);
 	
 	if(!pos){
 		if(tmp == 0xe0 || tmp == 0xe1){
@@ -219,6 +219,7 @@ static LPSTREAM ps2_kbd_open(wchar_t * name,u64 mode,struct _FCPEB_ * fc){
 	file = kmalloc(sizeof(STREAM),0);
 	memset(file,0,sizeof(STREAM));
 	file->gst = GST_FILE;
+	file->fc = fc;
 	return file;
 }
 static int ps2_kbd_close(LPSTREAM file){
@@ -270,25 +271,28 @@ static struct _FCPEB_ ps2_kbd_fc = {
 
 
 void ps2_kbd_init(){
+	u64 rf;
 	
-	while(inb(0x64) & 0x02) nop();
-	outb(0x64,0xae);
-	while(inb(0x64) & 0x02) nop();
-	outb(0x60,0x00);
-	while(inb(0x64) & 0x02) nop();
-	outb(0x60,0xed);
-	while(inb(0x64) & 0x02) nop();
-	outb(0x60,0x00);
-	request_irq(KBD_IRQ,ps2_kbd_handle);
-	while(!(inb(0x64) & 0x01)) nop();
-	inb(0x60);
-	while(!(inb(0x64) & 0x01)) nop();
-	inb(0x60);
-	while(!(inb(0x64) & 0x01)) nop();
-	inb(0x60);
+	SFI(rf);
+	while(inb(EISA_KBD_CMD_STATUS_PORT) & EISA_8042_IN_BUF_FULL) pause();
+	outb(EISA_KBD_CMD_STATUS_PORT,EISA_8042_KDB_ENABLE);
+	while(inb(EISA_KBD_CMD_STATUS_PORT) & EISA_8042_IN_BUF_FULL) pause();
+	outb(EISA_KBD_DATA_PORT,0x00);
+	while(inb(EISA_KBD_CMD_STATUS_PORT) & EISA_8042_IN_BUF_FULL) pause();
+	outb(EISA_KBD_DATA_PORT,EISA_8042_SET_LED);
+	while(inb(EISA_KBD_CMD_STATUS_PORT) & EISA_8042_IN_BUF_FULL) pause();
+	outb(EISA_KBD_DATA_PORT,0x00);
+	while(!(inb(EISA_KBD_CMD_STATUS_PORT) & EISA_8042_OUT_BUF_FULL)) pause();
+	inb(EISA_KBD_DATA_PORT);
+	request_irq(EISA_KEYBOARD_IRQ,ps2_kbd_handle);
+	while(!(inb(EISA_KBD_CMD_STATUS_PORT) & EISA_8042_OUT_BUF_FULL)) pause();
+	inb(EISA_KBD_DATA_PORT);
+	while(!(inb(EISA_KBD_CMD_STATUS_PORT) & EISA_8042_OUT_BUF_FULL)) pause();
+	inb(EISA_KBD_DATA_PORT);
+	LF(rf);
 	head = tail = 0;
 	create_semaphore_ex(FIFO_SIZE,0,&semaphore);
 	fs_map(path,&ps2_kbd_fc);
-	irq_enable(KBD_IRQ);
+	irq_enable(EISA_KEYBOARD_IRQ);
 }
 

@@ -22,25 +22,47 @@
 #include <asm.h>
 #include <int.h>
 #include <stdio.h>
+#include <spinlock.h>
+#include <kernel.h>
 void draw_char(int ch);
 
+static int lock = 0;
+
 void putwchar(wchar_t ch){
+	u64 rf;
+
+	SFI(rf);
+	spin_lock_bit(&lock,0);
 	draw_char(ch);
+	spin_unlock_bit(&lock,0);
+	LF(rf);
 }
 void wprint(const wchar_t * Str){
+	u64 rf;
+	
+	SFI(rf);
+	spin_lock_bit(&lock,0);
 	while(*Str){
 		draw_char(*Str);
 		Str++;
 	}
+	spin_unlock_bit(&lock,0);
+	LF(rf);
 }
 void putws(const wchar_t * Str){
+	u64 rf;
+
+	SFI(rf);
+	spin_lock_bit(&lock,0);
 	while(*Str){
 		draw_char(*Str);
 		Str++;
 	}
 	draw_char(L'\n');
+	spin_unlock_bit(&lock,0);
+	LF(rf);
 }
-int __attribute__((noinline)) wprintf(const wchar_t * fmt,...) {
+int __attribute__((noinline)) wprintk(const wchar_t * fmt,...) {
 	int ret;
 	wchar_t PrintfBuf[256];
 	ret = vwsprintf(PrintfBuf, 256, fmt, ((int64_t*)(&fmt)) + 1);
@@ -49,20 +71,38 @@ int __attribute__((noinline)) wprintf(const wchar_t * fmt,...) {
 }
 
 void putchar(char ch){
+	u64 rf;
+
+	SFI(rf);
+	spin_lock_bit(&lock,0);
 	draw_char(ch);
+	spin_unlock_bit(&lock,0);
+	LF(rf);
 }
 void print(const char * Str){
+	u64 rf;
+
+	SFI(rf);
+	spin_lock_bit(&lock,0);
 	while(*Str){
 		draw_char(*Str);
 		Str++;
 	}
+	spin_unlock_bit(&lock,0);
+	LF(rf);
 }
 void puts(const char * Str){
+	u64 rf;
+
+	SFI(rf);
+	spin_lock_bit(&lock,0);
 	while(*Str){
 		draw_char(*Str);
 		Str++;
 	}
 	draw_char('\n');
+	spin_unlock_bit(&lock,0);
+	LF(rf);
 }
 int __attribute__((noinline)) printk(const char * fmt,...) {
 	int ret;

@@ -45,7 +45,6 @@ spin_optr_struct_member_bit(TimerField,struct _TIMER_,busy,TIMER_FIELD_BUSY_BIT)
 void schedule();
 
 static LPTIMER timer_list;//时钟链表，链表头一经初始化则不修改
-static u64 ticks;
 static u64 tick_time;
 static int cur_counter_type;
 static void (*counter_enable)();
@@ -59,9 +58,9 @@ void counter_updata(){//中断代码，要求处理器禁止调度
 	//counter_updata仅使用时钟链表中的next字段
 	LPTIMER cur;
 	u64 tick_count;
+	u64 rf;
 
 	ticks++;
-	ID();
 	LockTimerList(timer_list);
 	cur = timer_list->next;
 	if(cur && cur != timer_list){
@@ -91,7 +90,6 @@ void counter_updata(){//中断代码，要求处理器禁止调度
 		}
 	}
 	UnlockTimerList(cur);
-	IE();
 	schedule();
 }
 int reg_counter(struct _COUNTER_ * counter){

@@ -167,118 +167,125 @@ static u8 pci_read_byte_m1(u8 bus,u8 dev,u8 fun,u8 reg){
 	u32 addr = 0x80000000;
 	int _o;
 	u32 data;
+	u64 rf;
 	
 	_o = reg & 0x03;
 	addr |= ((u32)reg) & 0xfc;
 	addr |= ((u32)fun) << 8;
 	addr |= ((u32)dev) << 11;
 	addr |= ((u32)bus) << 16;
-	ID(); LockPort();
+	SFI(rf); LockPort();
 	outd(PCI_C1_ADDR,addr);
 	data = ind(PCI_C1_DATA);
-	UnlockPort(); IE();
+	UnlockPort(); LF(rf);
 	return (data >> (_o << 3)) & 0x0ff;
 }
 static u16 pci_read_word_m1(u8 bus,u8 dev,u8 fun,u8 reg){
 	u32 addr = 0x80000000;
 	int _o;
 	u32 data;
-	
+	u64 rf;
+
 	_o = reg & 0x03;
 	addr |= ((u32)reg) & 0xfc;
 	addr |= ((u32)fun) << 8;
 	addr |= ((u32)dev) << 11;
 	addr |= ((u32)bus) << 16;
-	ID(); LockPort();
+	SFI(rf); LockPort();
 	outd(PCI_C1_ADDR,addr);
 	outd(PCI_C1_ADDR,addr);
 	data = ind(PCI_C1_DATA);
-	UnlockPort(); IE();
+	UnlockPort(); LF(rf);
 	return (data >> (_o << 3)) & 0x0ffff;
 }
 static u32 pci_read_dword_m1(u8 bus,u8 dev,u8 fun,u8 reg){
 	u32 addr = 0x80000000;
 	int _o;
 	u32 data;
+	u64 rf;
 	
 	_o = reg & 0x03;
 	addr |= ((u32)reg) & 0xfc;
 	addr |= ((u32)fun) << 8;
 	addr |= ((u32)dev) << 11;
 	addr |= ((u32)bus) << 16;
-	ID(); LockPort();
+	SFI(rf); LockPort();
 	outd(PCI_C1_ADDR,addr);
 	data = ind(PCI_C1_DATA);
-	UnlockPort(); IE();
+	UnlockPort(); LF(rf);
 	return data;
 }
 static void pci_write_byte_m1(u8 bus,u8 dev,u8 fun,u8 reg,u8 v){
 	u32 addr = 0x80000000;
 	int _o;
 	u32 data;
+	u64 rf;
 
 	_o = reg & 0x03;
 	addr |= ((u32)reg) & 0xfc;
 	addr |= ((u32)fun) << 8;
 	addr |= ((u32)dev) << 11;
 	addr |= ((u32)bus) << 16;
-	ID(); LockPort();
+	SFI(rf); LockPort();
 	outd(PCI_C1_ADDR,addr);
 	data = ind(PCI_C1_DATA);
 	data &= ~(0x0ff << (_o << 3));
 	data |= v << (_o << 3);
 	outd(PCI_C1_ADDR,addr);
 	outd(PCI_C1_DATA,data);
-	UnlockPort(); IE();
+	UnlockPort(); LF(rf);
 }
 static void pci_write_word_m1(u8 bus,u8 dev,u8 fun,u8 reg,u16 v){
 	u32 addr = 0x80000000;
 	int _o;
 	u32 data;
+	u64 rf;
 	
 	_o = reg & 0x03;
 	addr |= ((u32)reg) & 0xfc;
 	addr |= ((u32)fun) << 8;
 	addr |= ((u32)dev) << 11;
 	addr |= ((u32)bus) << 16;
-	ID(); LockPort();
+	SFI(rf); LockPort();
 	outd(PCI_C1_ADDR,addr);
 	data = ind(PCI_C1_DATA);
 	data &= ~(0x0ffff << (_o << 3));
 	data |= v << (_o << 3);
 	outd(PCI_C1_ADDR,addr);
 	outd(PCI_C1_DATA,data);
-	UnlockPort(); IE();
+	UnlockPort(); LF(rf);
 }
 static void pci_write_dword_m1(u8 bus,u8 dev,u8 fun,u8 reg,u32 v){
 	u32 addr = 0x80000000;
 	int _o;
+	u64 rf;
 
 	_o = reg & 0x03;
 	addr |= ((u32)reg) & 0xfc;
 	addr |= ((u32)fun) << 8;
 	addr |= ((u32)dev) << 11;
 	addr |= ((u32)bus) << 16;
-	ID(); LockPort();
+	SFI(rf); LockPort();
 	outd(PCI_C1_ADDR,addr);
 	outd(PCI_C1_DATA,v);
-	UnlockPort(); IE();
+	UnlockPort(); LF(rf);
 }
 static u8 pci_read_byte_m2(u8 bus,u8 dev,u8 fun,u8 reg){
 	u16 Port = PCI_C2_REGB;
 	u8 addr = 0xf0;
 	u32 data;
 	int _o;
+	u64 rf;
 	
 	_o = reg & 0x03;
 	addr |= fun << 1;
 	Port |= ((u16)dev) << 8;
 	Port |= ((u16)reg) & 0xfc;
-	ID(); LockPort();
+	SFI(rf); LockPort();
 	outb(PCI_C2_FUN,addr);
 	outb(PCI_C2_BUS,bus);
 	data = ind(Port);
-	UnlockPort(); IE();
+	UnlockPort(); LF(rf);
 	return (data >> (_o << 3)) & 0x0ff;
 }
 static u16 pci_read_word_m2(u8 bus,u8 dev,u8 fun,u8 reg){
@@ -286,16 +293,17 @@ static u16 pci_read_word_m2(u8 bus,u8 dev,u8 fun,u8 reg){
 	u8 addr = 0xf0;
 	u32 data;
 	int _o;
+	u64 rf;
 	
 	_o = reg & 0x03;
 	addr |= fun << 1;
 	Port |= ((u16)dev) << 8;
 	Port |= ((u16)reg) & 0xfc;
-	ID(); LockPort();
+	SFI(rf); LockPort();
 	outb(PCI_C2_FUN,addr);
 	outb(PCI_C2_BUS,bus);
 	data = ind(Port);
-	UnlockPort(); IE();
+	UnlockPort(); LF(rf);
 	return (data >> (_o << 3)) & 0x0ffff;
 }
 static u32 pci_read_dword_m2(u8 bus,u8 dev,u8 fun,u8 reg){
@@ -303,16 +311,17 @@ static u32 pci_read_dword_m2(u8 bus,u8 dev,u8 fun,u8 reg){
 	u8 addr = 0xf0;
 	u32 data;
 	int _o;
+	u64 rf;
 	
 	_o = reg & 0x03;
 	addr |= fun << 1;
 	Port |= ((u16)dev) << 8;
 	Port |= ((u16)reg) & 0xfc;
-	ID(); LockPort();
+	SFI(rf); LockPort();
 	outb(PCI_C2_FUN,addr);
 	outb(PCI_C2_BUS,bus);
 	data = ind(Port);
-	UnlockPort(); IE();
+	UnlockPort(); LF(rf);
 	return data;
 }
 static void pci_write_byte_m2(u8 bus,u8 dev,u8 fun,u8 reg,u8 v){
@@ -320,12 +329,13 @@ static void pci_write_byte_m2(u8 bus,u8 dev,u8 fun,u8 reg,u8 v){
 	u8 addr = 0xf0;
 	u32 data;
 	int _o;
+	u64 rf;
 
 	_o = reg & 0x03;
 	addr |= fun << 1;
 	Port |= ((u16)dev) << 8;
 	Port |= ((u16)reg) & 0xfc;
-	ID(); LockPort();
+	SFI(rf); LockPort();
 	outb(PCI_C2_FUN,addr);
 	outb(PCI_C2_BUS,bus);
 	data = ind(Port);
@@ -334,19 +344,20 @@ static void pci_write_byte_m2(u8 bus,u8 dev,u8 fun,u8 reg,u8 v){
 	outb(PCI_C2_FUN,addr);
 	outb(PCI_C2_BUS,bus);
 	outd(Port,data);
-	UnlockPort(); IE();
+	UnlockPort(); LF(rf);
 }
 static void pci_write_word_m2(u8 bus,u8 dev,u8 fun,u8 reg,u16 v){
 	u16 Port = PCI_C2_REGB;
 	u8 addr = 0xf0;
 	u32 data;
 	int _o;
+	u64 rf;
 	
 	_o = reg & 0x03;
 	addr |= fun << 1;
 	Port |= ((u16)dev) << 8;
 	Port |= ((u16)reg) & 0xfc;
-	ID(); LockPort();
+	SFI(rf); LockPort();
 	outb(PCI_C2_FUN,addr);
 	outb(PCI_C2_BUS,bus);
 	data = ind(Port);
@@ -355,22 +366,23 @@ static void pci_write_word_m2(u8 bus,u8 dev,u8 fun,u8 reg,u16 v){
 	outb(PCI_C2_FUN,addr);
 	outb(PCI_C2_BUS,bus);
 	outd(Port,data);
-	UnlockPort(); IE();
+	UnlockPort(); LF(rf);
 }
 static void pci_write_dword_m2(u8 bus,u8 dev,u8 fun,u8 reg,u32 v){
 	u16 Port = PCI_C2_REGB;
 	u8 addr = 0xf0;
 	int _o;
+	u64 rf;
 
 	_o = reg & 0x03;
 	addr |= fun << 1;
 	Port |= ((u16)dev) << 8;
 	Port |= ((u16)reg) & 0xfc;
-	ID(); LockPort();
+	SFI(rf); LockPort();
 	outb(PCI_C2_FUN,addr);
 	outb(PCI_C2_BUS,bus);
 	outd(Port,v);
-	UnlockPort(); IE();
+	UnlockPort(); LF(rf);
 }
 u8 pci_read_byte(LPPCIDEV dev,u8 reg){
 	return __pci_read_byte(dev->bus,dev->dev,dev->fun,reg);

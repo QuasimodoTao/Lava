@@ -86,12 +86,12 @@ inline BMS bmsset(BMS bit_map,size_t start,size_t count){
 }
 inline BMS bmscat(BMS _d,size_t len,BMS _s,size_t start,size_t count){
 	size_t byte_off, bit_off;
-	u8 * s,*d;
+	u8 *s,*d;
 	u8 byte;
 	u8 mask1,mask2;
 	
-	s = _s;
-	d = _d;
+	s = (void*)_s;
+	d = (void*)_d;
 	while(start & 0x07 && count){
 		if(bt(s,start)) bts(d,len);
 		else btr(d,len);
@@ -239,7 +239,7 @@ inline size_t bmsr0(BMS _s,size_t start,size_t count){
 	if(!count) return 0xffffffffffffffff;
 	s-=8;
 	while(count >= 64){
-		id(~*(u64*)s){
+		if(~*(u64*)s){
 			i = 64;
 			while(i && count){
 				if(!bt(s,i)) return i + (s - (u8*)_s) * 8;
@@ -289,7 +289,7 @@ inline size_t bmsr1(BMS _s,size_t start,size_t count){
 	if(!count) return 0xffffffffffffffff;
 	s-=8;
 	while(count >= 64){
-		id(*(u64*)s){
+		if(*(u64*)s){
 			i = 64;
 			while(i && count){
 				if(bt(s,i)) return i + (s - (u8*)_s) * 8;

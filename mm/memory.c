@@ -266,7 +266,7 @@ void * kmalloc(size_t size,unsigned int align){
 	struct KMCB * cur, * first;
 	u8 * mask, * _mask;
 	u64 t, count, page;
-	
+	u64 rf;
 	
 	{//检查参数是否合法
 		if(!size) return NULL;
@@ -299,7 +299,7 @@ void * kmalloc(size_t size,unsigned int align){
 		for(i = 0;i < sizeof(mem_sup)/sizeof(struct SupBlk);i++) 
 			if(mem_sup[i].size >= size) break;
 		size = (mem_sup[i].size + 1) << 3;
-		ID();
+		SFI(rf);
 		LockHeap(); heap_busy_count++; UnlockHeap();//记录进入操作
 		LockFirst(i);
 		if(i <= 13){
@@ -309,7 +309,7 @@ void * kmalloc(size_t size,unsigned int align){
 					UnlockEmpty();
 					UnlockFirst(i);
 					LockHeap(); heap_busy_count--; UnlockHeap();//记录退出操作
-					IE();
+					LF(rf);
 					return NULL;
 				}
 				cur = first_useable[i] = first_empty;
@@ -334,7 +334,7 @@ void * kmalloc(size_t size,unsigned int align){
 				ret = (void*)((cur - first_block) * PAGE_SIZE + ker_heap_base);
 				UnlockFirst(i);
 				LockHeap(); heap_busy_count--; UnlockHeap();//记录退出操作
-				IE();
+				LF(rf);
 				return ret;
 			}
 			else{
@@ -354,7 +354,7 @@ void * kmalloc(size_t size,unsigned int align){
 				if(!cur->ctrl) first_useable[i] = NULL;
 				UnlockFirst(i);
 				LockHeap(); heap_busy_count--; UnlockHeap();//记录退出操作
-				IE();
+				LF(rf);
 				return ret;
 			}
 		}
@@ -365,7 +365,7 @@ void * kmalloc(size_t size,unsigned int align){
 					UnlockEmpty();
 					UnlockFirst(i);
 					LockHeap(); heap_busy_count--; UnlockHeap();//记录退出操作
-					IE();
+					LF(rf);
 					return NULL;
 				}
 				cur = first_useable[i] = first_empty;
@@ -383,7 +383,7 @@ void * kmalloc(size_t size,unsigned int align){
 				cur->lock = 0;
 				UnlockFirst(i);
 				LockHeap(); heap_busy_count--; UnlockHeap();//记录退出操作
-				IE();
+				LF(rf);
 				return ret;
 			}
 			else{
@@ -402,7 +402,7 @@ void * kmalloc(size_t size,unsigned int align){
 				if(!(j & 0x1f)) first_useable[i] = NULL;
 				UnlockFirst(i);
 				LockHeap(); heap_busy_count--; UnlockHeap();//记录退出操作
-				IE();
+				LF(rf);
 				return ret;
 			}
 		}
@@ -410,13 +410,13 @@ void * kmalloc(size_t size,unsigned int align){
 	else{
 		size += 0x1ff;//qword count
 		size >>= 9;//page count
-		ID();
+		SFI(rf);
 		LockHeap();//记录进入操作,锁定则只能进行一个进行以页分配的堆的线程
 		for(cur = first_empty;cur <= last_block;cur++){
 			while(last_block - cur < size){//扩展区域
 				if(last_block >= __last_block) {
 					UnlockHeap();
-					IE();
+					LF(rf);
 					return NULL;
 				}
 				last_block++;
@@ -467,7 +467,7 @@ void * kmalloc(size_t size,unsigned int align){
 					search_next();
 				}
 				UnlockHeap();
-				IE();
+				LF(rf);
 				return ret;
 			}
 		}
@@ -530,8 +530,9 @@ void kfree(void * addr){
 u64 ker_heap_clean(){
 	struct KMCB * cur;
 	u64 free_count = 0;
+	u64 rf;
 	
-	ID();
+	SFI(rf);
 	while(1){
 		LockHeap();
 		if(!heap_busy_count) break;
@@ -545,7 +546,7 @@ u64 ker_heap_clean(){
 		}
 	}
 	UnlockHeap();
-	IE();
+	LF(rf);
 	return free_count;
 }
 void * vmalloc(size_t size){

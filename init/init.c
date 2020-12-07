@@ -25,6 +25,7 @@
 #include <fs.h>
 #include <mm.h>
 #include <int.h>
+#include <graph.h>
 
 struct _TASK_{
 	int lock;
@@ -82,26 +83,45 @@ int test_thread(void * none){
 	LPSTREAM serial;
 	char buf[32];
 	LPSTREAM kbd;
+	int ch;
 
-	serial = open(L".dev/serial/COM1.dev",0);
-	kbd = open(L".dev/ps2_kbd.dev",0);
+	wprintk(L"测试线程执行成功了。\n");
+	serial = open(L"/.dev/serial/COM1.dev",0);
+	if(serial) wprintk(L"成功打开了 COM1。\n");
+	kbd = open(L"/.dev/ps2_kbd.dev",0);
+	if(kbd) wprintk(L"成功打开了键盘。\n");
 	
 	//while(read(serial,32,buf));
+	//ShowHexs(buf,2);
 	//write(serial,sizeof("This is a test.\n"),"This is a test.\n");
 	
 	while(1){
+		ch = get(kbd);
+		if(ch & KEY_S_LOOSEN) continue;
+		printk("%c.",ch & 0x7f);
+	}
+
+	while(1){
+		//printk("On CPU %d,%d.\n",GetCPUId(),GetCurThread()->id);
 		halt();
-		//printk("On CPU %d,%P.\n",GetCPUId(),GetCurThread());
-		
+	}
+}
+int test_thread2(void * none){
+	int i = 0;
+
+	while(1){
+		wait(1000);
+		i++;
+		printk("tick:%d.i:%d.\n",ticks,i);
 	}
 }
 
 int init_thread_entry(void*none){
-	volatile int i;
-	int j;
+	int i,j;
 	u64 * double_fault_stack;
+	static volatile int finished = 0;
 
-	IE();
+	sti();
 	spin_unlock_bit(ADDRP2V(PROCESS_INIT_MUTEX),0);
 	double_fault_stack = kmalloc(PAGE_SIZE,PAGE_SIZE);
 	double_fault_stack += PAGE_SIZE/sizeof(u64);
@@ -120,11 +140,15 @@ int init_thread_entry(void*none){
 			task[i].task();
 			print(task[i].str);
 			bts(&(task[i].lock),1);
+			xaddd(&finished,1);
 		}
 	}
-	SD();
-	printk("Process %d activing.\n",GetCPUId());
-	SE();
+	if(!GetCPUId()){
+		while(finished < sizeof(task)/sizeof(struct _TASK_)) pause();
+		wprintk(L"欢迎使用Lava OS。\n");
+		create_thread(NULL,test_thread,NULL);
+		create_thread(NULL,test_thread2,NULL);
+	}
 	while(1) halt();
 }
 void __attribute__((noreturn)) ap_entry_point(){//AP start at here
