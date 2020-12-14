@@ -318,8 +318,10 @@ void send_ipi(u8 ipi,u8 dest_cpu,int priority,int mode){
 }
 void ipi_arise(int ipi){
 	EOI();
+	SD();
 	if(ipi > IPI_COUNT) return;
 	if(ipi_handle[ipi]) ipi_handle[ipi]();
+	SE();
 	if(GetCurThread()->need_destory) exit(ERR_BE_DESTORY);
 }
 void request_ipi(u8 ipi,int(*handle)()){
@@ -330,6 +332,7 @@ void irq_arise(int irq){
 	struct _IRQ_HANDLE_ * cur;
 	
 	EOI();
+	SD();
 	for(cur = irq_handle[irq];cur;cur = cur->next){
 		if(!cur->handle){
 			print("BUG:arch/init.c::int_vector_ent().\n");
@@ -337,6 +340,7 @@ void irq_arise(int irq){
 		}
 		cur->handle(irq);
 	}
+	SE();
 }
 void lapic_init(){
 	u8 lapic_id;

@@ -79,9 +79,13 @@ static int int_arise;
 static wchar_t * path = L".dev/ps2_kbd.dev";
 
 static void istream(int code){
+	u64 rf;
+
+	SFI(rf);
 	fifo[tail] = code;
 	tail++;
 	tail %= FIFO_SIZE;
+	LF(rf);
 	release_semaphore(1,&semaphore,0);
 }
 static int ps2_kbd_handle(int irq){

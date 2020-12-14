@@ -360,11 +360,13 @@ int wake_up(LPTHREAD thread){
 
 	if(!thread || !addr_vaild(NULL,thread) || thread->gst != GST_THREAD) return ERR_INVAILD_PTR;
 	thread->flag = TF_ACTIVE;
+	schedule();
 	return 0;
 }
 static void wait_call_back(LPTIMER timer,LPTHREAD thread){
 	thread->wait_state = TFW_OUT_OF_TIME;
 	thread->flag = TF_ACTIVE;
+	schedule();
 }
 int wait(int msecond){
 	LPTHREAD thread;
@@ -396,10 +398,12 @@ int destory_mutex(struct _MUTEX_ * mutex){
 	while(thread = mutex->wait.t){//逐个唤醒正在等待的线程
 		thread->wait_state = TFW_RESOURCE_DESTORY;
 		thread->flag = TF_ACTIVE;
+		schedule();
 	}
 	while(thread = mutex->release.t){
 		thread->wait_state = TFW_RESOURCE_DESTORY;
 		thread->flag = TF_ACTIVE;
+		schedule();
 	}
 	if(mutex->flags & MUTEX_ALLOC) kfree(mutex);//释放信号量
 	return 0;
@@ -419,6 +423,7 @@ struct _MUTEX_ * create_mutex_ex(int locked,struct _MUTEX_ * mutex){//创建一�
 static void mutex_timer_call_back(LPTIMER timer,LPTHREAD thread){//线程等待超时时则调用此函数，唤醒线程
 	thread->wait_state = TFW_OUT_OF_TIME;
 	thread->flag = TF_ACTIVE;
+	schedule();
 }
 int wait_mutex(struct _MUTEX_ * mutex,int time){//抢占资源
 	LPTHREAD thread;
@@ -484,7 +489,10 @@ int wait_mutex(struct _MUTEX_ * mutex,int time){//抢占资源
 	}
 	UnlockMutex(mutex);
 	LF(rf);
-	if(thread) thread->flag = TF_ACTIVE;	
+	if(thread) {
+		thread->flag = TF_ACTIVE;	
+		schedule();
+	}
 	return 0;
 }
 int release_mutex(struct _MUTEX_ * mutex,int time){
@@ -560,7 +568,10 @@ int release_mutex(struct _MUTEX_ * mutex,int time){
 	}
 	UnlockMutex(mutex);
 	LF(rf);
-	if(thread) thread->flag = TF_ACTIVE;	
+	if(thread) {
+		thread->flag = TF_ACTIVE;
+		schedule();	
+	}
 	return 0;
 }
 
@@ -596,6 +607,7 @@ struct _SEMAPHORE_ * create_semaphore_ex(int max,int cur,struct _SEMAPHORE_ * se
 static void semaphore_timer_call_back(LPTIMER timer,LPTHREAD thread){//线程等待超时时则调用此函数，唤醒线程
 	thread->wait_state = TFW_OUT_OF_TIME;
 	thread->flag = TF_ACTIVE;
+	schedule();
 }
 int wait_semaphore(int val,struct _SEMAPHORE_ * se,int time){//抢占资源
 	LPTHREAD thread;
@@ -660,12 +672,14 @@ int wait_semaphore(int val,struct _SEMAPHORE_ * se,int time){//抢占资源
 		se->release.t = next;
 		if(!next) se->release.p = NULL;
 		thread->flag = TF_ACTIVE;
+		schedule();
 	}
 	if(se->wait.t && se->cur >= se->wait.t->semaphore_val) {
 		thread = se->wait.t;
 		se->wait.t = next;
 		if(!next) se->wait.p = NULL;
 		thread->flag = TF_ACTIVE;
+		schedule();
 	}
 	UnlockSemaphore(se);
 	LF(rf);
@@ -728,18 +742,20 @@ int release_semaphore(int val,struct _SEMAPHORE_ * se,int time){
 		se->release.t = next;
 		if(!next) se->release.p = NULL;
 	}
-	se->cur -= val;
+	se->cur += val;
 	if(se->wait.t && se->max - se->cur >= se->wait.t->semaphore_val){
 		thread = se->wait.t;
 		se->wait.t = next;
 		if(!next) se->wait.p = NULL;
 		thread->flag = TF_ACTIVE;
+		schedule();
 	}
 	if(se->release.t && se->cur >= se->release.t->semaphore_val) {
 		thread = se->release.t;
 		se->release.t = next;
 		if(!next) se->release.p = NULL;
 		thread->flag = TF_ACTIVE;
+		schedule();
 	}
 	UnlockSemaphore(se);
 	LF(rf);

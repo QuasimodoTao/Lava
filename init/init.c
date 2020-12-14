@@ -147,7 +147,7 @@ int init_thread_entry(void*none){
 		while(finished < sizeof(task)/sizeof(struct _TASK_)) pause();
 		wprintk(L"欢迎使用Lava OS。\n");
 		create_thread(NULL,test_thread,NULL);
-		create_thread(NULL,test_thread2,NULL);
+		//create_thread(NULL,test_thread2,NULL);
 	}
 	while(1) halt();
 }
