@@ -48,11 +48,11 @@ static int BlockV2R(struct _NODE_ * pNode,u32 viBlock){
 	u32 riBlock2;
 	u32 Index;
 	
-	if(!viBlock && pNode->pNode.Attr & NodeAttrData) return 0xffffffff;
-	if(viBlock < 16) return pNode->pNode.Block[viBlock];
-	viBlock -= 16;
+	if(!viBlock && pNode->pNode.attr & NODE_ATTR_DATA) return 0xffffffff;
+	if(viBlock < NODE_ZONE_32_DIRECT_CNT) return pNode->pNode.block[viBlock];
+	viBlock -= NODE_ZONE_32_DIRECT_CNT;
 	if(viBlock < 1024){
-		riBlock0 = pNode->pNode.Block[16];
+		riBlock0 = pNode->pNode.block[NODE_ZONE_32_L1];
 		if(pNode->iBlock0 != riBlock0) {
 			pNode->iBlock0 = riBlock0;
 			ReadBlock(riBlock0,pNode->pBlock0,1);
@@ -61,7 +61,7 @@ static int BlockV2R(struct _NODE_ * pNode,u32 viBlock){
 	}
 	viBlock -= 1024;
 	if(viBlock < 1024 * 1024){
-		riBlock0 = pNode->pNode.Block[17];
+		riBlock0 = pNode->pNode.block[NODE_ZONE_32_L2];
 		if(pNode->iBlock0 != riBlock0){
 			pNode->iBlock0 = riBlock0;
 			ReadBlock(riBlock0,pNode->pBlock0,1);
@@ -77,7 +77,7 @@ static int BlockV2R(struct _NODE_ * pNode,u32 viBlock){
 	}
 	viBlock -= 1024*1024;
 	if(viBlock < 1024 * 1024 * 1024){
-		riBlock0 = pNode->pNode.Block[18];
+		riBlock0 = pNode->pNode.block[NODE_ZONE_32_L3];
 		if(pNode->iBlock0 != riBlock0){
 			pNode->iBlock0 = riBlock0;
 			ReadBlock(riBlock0,pNode->pBlock0,1);
@@ -113,7 +113,7 @@ int Seek(s64 Pos,int Org,struct _NODE_ * pNode){
 	}
 	else if(Org == SEEK_END){
 		if(Pos > 0) return -1;
-		pNode->GPos = pNode->pNode.Size + Pos;
+		pNode->GPos = pNode->pNode.file_size + Pos;
 	}
 	else return -1;
 	viBlock = pNode->GPos >> 12;
@@ -121,8 +121,8 @@ int Seek(s64 Pos,int Org,struct _NODE_ * pNode){
 	pNode->viBuf = viBlock;
 	riBlock = BlockV2R(pNode,viBlock);
 	if(riBlock == 0xffffffff && !viBlock) {
-		memcpy(pNode->RBuf,pNode->pNode.Data,76);
-		memset(((u8*)(pNode->RBuf)) + 76,0,4096-76);
+		memcpy(pNode->RBuf,pNode->pNode.data,NODE_ZONE_SIZE);
+		memset(((u8*)(pNode->RBuf)) + NODE_ZONE_SIZE,0,4096-NODE_ZONE_SIZE);
 		return 0;
 	}
 	ReadBlock(riBlock,pNode->RBuf,1);
@@ -168,7 +168,7 @@ static int GetNode(u32 iNode, struct Node * pNode){
 }
 struct _NODE_ * Open(const wchar_t * Name){
 	struct _NODE_ * Ret;
-	struct LFS_Dictionary Dir;
+	struct LFS_DIR Dir;
 	wchar_t * _Name;
 	u32 NameLen;
 	u64 Pos;
@@ -179,17 +179,17 @@ struct _NODE_ * Open(const wchar_t * Name){
 	NameLen = wcslen(Name);
 	_Name = malloc(NameLen * 2 + 0x0f);
 	while(1){
-		Read(&Root,&Dir,sizeof(struct LFS_Dictionary));
-		if(!Dir.NameLen) {
+		Read(&Root,&Dir,sizeof(struct LFS_DIR));
+		if(!Dir.name_len) {
 			free(_Name);
 			return NULL;
 		}
-		if(Dir.Attr & DirAttrExist && !(Dir.Attr & DirAttrDir) && Dir.NameLen == NameLen){
+		if(Dir.attr & DIR_ATTR_EXIST && !(Dir.attr & DIR_ATTR_DIR) && Dir.name_len == NameLen){
 			Read(&Root,_Name,sizeof(wchar_t) * ((NameLen + 0x07) & 0xfff8));
 			if(!wcsncmp(Name,_Name,NameLen)){
 				free(_Name);
 				Ret = malloc(sizeof(struct _NODE_));
-				Ret->iNode = Dir.Node;
+				Ret->iNode = Dir.node;
 				GetNode(Ret->iNode,&Ret->pNode);
 				Ret->pBlock0 = malloc(4096);
 				Ret->pBlock1 = malloc(4096);
@@ -204,7 +204,7 @@ struct _NODE_ * Open(const wchar_t * Name){
 				return Ret;
 			}
 		}
-		else Seek(((Dir.NameLen + 0x7) & 0xfff8) * sizeof(wchar_t),SEEK_CUR,&Root);
+		else Seek(((Dir.name_len + 0x7) & 0xfff8) * sizeof(wchar_t),SEEK_CUR,&Root);
 	}
 }
 int Close(struct _NODE_ * File){
@@ -222,7 +222,7 @@ int64_t LFSInit(int64_t MemoryStart,GUID * ActivePart){
 	u64 GPTFirst;
 	int i;
 	u32 EntSize, EntCnt, CRC32;
-	struct LFS_DataHeader * fHeader;
+	struct LFS_HEAD * fHeader;
 	
 	Header = (struct GPTHeader *)MemoryStart;
 	Entry = (struct GPTEntry *)MemoryStart;
@@ -258,7 +258,7 @@ int64_t LFSInit(int64_t MemoryStart,GUID * ActivePart){
 	PartLast = Entry[i].EndingLBA;
 	fHeader = (struct LFS_DataHeader *)MemoryStart;
 	PartRead(8,fHeader,1);
-	BlockCount = fHeader->BlockCount;
+	BlockCount = fHeader->block_count;
 	Node.iBlock0 = 0xffffffff;
 	Node.pBlock0 = (u32*)MemoryStart;
 	Node.iBlock1 = 0xffffffff;
@@ -280,9 +280,9 @@ int64_t LFSInit(int64_t MemoryStart,GUID * ActivePart){
 	Root.viBuf = 0xffffffff;
 	Root.GPos = 0;
 	MemoryStart += 4096;
-	i = ReadBlock(fHeader->Node0Block,Node.RBuf,1);
-	memcpy(&Node.pNode,((struct Node*)(Node.RBuf))+Node.iNode,sizeof(struct Node));
-	memcpy(&Root.pNode,((struct Node*)(Node.RBuf))+Root.iNode,sizeof(struct Node));
+	i = ReadBlock(fHeader->node_0_block,Node.RBuf,1);
+	memcpy(&Node.pNode,((struct LFS_NODE*)(Node.RBuf))+Node.iNode,sizeof(struct LFS_NODE));
+	memcpy(&Root.pNode,((struct LFS_NODE*)(Node.RBuf))+Root.iNode,sizeof(struct LFS_NODE));
 	return MemoryStart;	
 }
 

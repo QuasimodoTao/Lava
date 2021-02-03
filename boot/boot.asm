@@ -18,50 +18,42 @@
 
 
 ;struct DataHeader{
-;	word MinVer;
-;	word MajVer;
-;	dword BlockCnt;
-;	qword SecCnt;
-;	
-;	dword Node0Block;
-;	dword Rvd0;
-;	dword Rvd1;
-;	dword Rvd2;
-;	
-;	dword Rvd3
-;	dword LMNode;
-;	dword FirstFreeBlock;
-;	dword FirstFreeNode;
-;	
-;	qword GlobalBlockCnt;
-;	qword GlobalFree;
-;	
-;	GUID FirstDisk;
-;	GUID FirstPart;
-;	GUID LastDisk;
-;	GUID LastPart;
-;	GUID PrevDisk;
-;	GUID PrevPart;
-;	GUID NextDisk;
-;	GUID NextPart;
-;	
-;	wchar_t wVolName[];	
+;	int32_t version;
+;	int crc32;
+;	uint32_t head_size;
+;	uint32_t path_len;
+;
+;	uint32_t name_len;
+;	uint32_t first_free_node;
+;	uint32_t first_free_block;
+;	uint32_t block_count;
+;
+;	uint32_t node_0_block;
+;	uint32_t free_block_count;
+;	stamp64_t create_time;
+;
+;	GUID owner;
+;
+;	wchar_t name_path[];
 ;};
 
 ;struct Node{
-;	qword Create;
-;	qword Access;
+;	stamp64_t create_time;
+;	stamp64_t access_time;
 ;
-;	qword Modify;
-;	qword Size;
+;	stamp64_t modify_time;
+;	stamp64_t delete_time;
 ;
-;	GUID Auther;
+;	uint64_t file_size;
+;	uint16_t attr;
+;	uint16_t links;
+;	uint32_t inode;
 ;
-;	short Attr;	//read,write,excuse,delete,autom data,system,hide,copy,link,dictionary
-;	short Link;
+;	GUID owner;
+;
 ;	union{
-;		dword Block[19];
-;		char data[76];
+;		dword Block[16];
+;		char data[64];
 ;	};
 ;};
 
@@ -80,6 +72,7 @@
 %define _SMAPSeg		0x00b0
 %define DefMode			0x0118
 %define OrginalData		0x00000500
+%define RAWFileSreg		0x5000
 
 %define Sec2BlockShift	3
 
@@ -92,6 +85,7 @@
 %define SectionRemind		4096+256+128+28;2
 %define SectionCount		4096+256+128+30;2
 %define SectionTableBase	4096+256+128+34;2
+%define NodeTmp			4096+512;4
 
 [CPU X64]
 [bits 16]
@@ -149,6 +143,8 @@ VideoModeFailStr:		db	"Get or set VESA mode fail.",0x0d,0x0a,0
 align 2
 OverSizeStr:			db	"Boot file over size,must less than 256KB.",0x0d,0x0a,0
 align 2
+RootOverSizeStr:		db	"Root over size, only test first 256KB.",0x0d,0x0a,0
+align 2
 UnsupposeImageStr:		db	"Unsuppose excutive image.",0x0d,0x0a,0
 align 2
 RelocationName:			db	".reloc",0,0
@@ -161,12 +157,18 @@ Unsuppose32CPUStr:		db	"Lava OS can not run on 32-bits processor(s).",0x0d,0x0a,
 align 2
 UnsupposeCPUStr:		db	"Lava OS can not run on this processor(s).",0x0d,0x0a,0
 align 2
+NoRootStr:				db	"No root dictionary.",0x0d,0x0a,0
+align 2
 HexStr:	db	"0123456789ABCDEF"
+align 2
+ActiveFileName:			db	'l',0,'m',0,'.',0,'s',0,'y',0,'s',0
+ActiveFileNameLen:		dw	6
 
 
 align 16
 Entry:
 	cli
+	cld
 	mov bx,LodSeg;初始化堆栈空间和段寄存器
 	mov es,bx
 	mov ss,bx
@@ -217,51 +219,79 @@ Entry:
 	in al,0x92		;打开A20
 	or al,2
 	out 0x92,al
-	
 	lgdt [ss:GDTR]		;加载GDTR，进入32必须的
-
-	mov esi,0
-	mov edi,0x100000
-	mov ecx,4096
 
 	push 1;Count
 	push 8192;pBlock
 	push 0;iBlock
 	push 1;ReadBlock(1,8192,1);
 	call ReadBlock;读取块1到0x9000:0x2000
-	mov ebx,[8192 + 36];LMNode
-	test ebx,ebx
-	jz NoLM;若LMNode为0，则表示不存在LM
-	mov eax,[8192 + 16];Node0Block
-	push eax
+
 	push 1
-	push 8192
-	push eax;ReadBlock(eax,8192,1)
-	call ReadBlock;读取Node0所在的块
-	mov di,BootNode;复制Node0到BootNode，实际上为临时的
-	mov si,8192
+	push 0x3000
+	push dword [8192 + 32]
+	call ReadBlock;ReadBlock(head->node_0_block,0x3000,1)
+	mov si,0x3000
+	mov di,NodeTmp
 	mov cx,64
-	rep movsw;复制Node0到0x9000:0x1000
-	mov eax,ebx
-	call ComputeBootNodeBlock;eax内为BootNode所在的块
-	pop ecx
-	cmp eax,ecx
-	je SameBlock
+	rep movsw
+	mov si,0x3000 + 128
+	mov di,BootNode
+	mov cx,64
+	rep movsw;memcpy(BootNode,&node[1],sizeof(struct _LFS_NODE_))
+
+	mov eax,[BootNode + 32];测试文件大小
+	mov edx,[BootNode + 36]
+	test edx,edx
+	jnz RootOverSize
+	cmp eax,262144;256KB
+	ja RootOverSize
+	test eax,eax
+	jnz ReadDirect
+	push NoRootStr
+	call Print
+	call Stop
+RootOverSize:
+	push RootOverSizeStr
+	call Print
+	mov dword [BootNode + 32],262144
+	mov dword [BootNode + 36],0
+ReadDirect:
+	call GetBootiBlock
+	call LoadBootFile
+	call SearchFile
+	
+	test eax,eax
+	jz NoLM;若LMNode为0，则表示不存在LM
+
+	mov si,NodeTmp
+	mov di,BootNode
+	mov cx,64
+	rep movsw
+
+	mov ecx,eax
+	shr eax,5
+	and ecx,0x1f
+	mov si,cx
+	shl si,7
+	add si,0x3000
+	test eax,eax
+	jz SameBlock
+	call ComputeBootNodeBlock
 	push 1
 	push 8192
 	push eax
 	call ReadBlock;ReadBlock(eax,8192,1)
-SameBlock:
-	mov si,bx
-	and si,0x1f
+	mov si,cx
 	shl si,7
 	add si,8192
+SameBlock:
 	mov di,BootNode;获取BootNode
 	mov cx,64
 	rep movsw
 	
-	mov eax,[BootNode + 24];测试文件大小
-	mov edx,[BootNode + 28]
+	mov eax,[BootNode + 32];测试文件大小
+	mov edx,[BootNode + 36]
 	test edx,edx
 	jnz BootOverSize
 	cmp eax,262144;256KB
@@ -378,6 +408,47 @@ SMAPFin:
 	lmsw ax			;设置PE位，cr0寄存器的第0位
 	jmp	dword 0x18:_In32Bit	;跳转到32位，
 
+SearchFile:
+	;uint32_t SearchFile();
+	push ds
+	push es
+	mov ax,RAWFileSreg
+	mov ds,ax
+	mov ax,LodSeg
+	mov es,ax
+test_next_entry:
+	cmp byte [0],0
+	je not_find_entry
+	mov di,ActiveFileName
+	mov cx,[es:ActiveFileNameLen]
+	cmp cl,[0]
+	jne next_entry
+	mov si,16
+	repe cmpsw
+	jne next_entry
+	test word [2],0x200
+	jz find_entry
+next_entry:
+	movzx ax,byte [0]
+	mov si,ds
+	shl ax,1
+	add si,1
+	add ax,0x0f
+	shr ax,4
+	add si,ax
+	mov ds,si
+	jmp test_next_entry
+find_entry:
+	mov eax,[4]
+	pop es	
+	pop ds
+	ret
+not_find_entry:
+	xor eax,eax
+	pop es
+	pop ds
+	ret
+
 Unsuppose8086:
 	push Unsuppose8086Str
 	call Print
@@ -452,6 +523,8 @@ BootOverSize:
 	push OverSizeStr
 	call Print
 	call Stop
+
+
 Stop:
 	hlt
 	jmp Stop
@@ -562,10 +635,9 @@ ComputeBootNodeBlock:;计算LMNode所在的块号
 	;int32_t fastcall ComputeBootNodeBlock(int32_t iNode:eax)
 	push esi
 	push ecx
-	shr eax,5
-	cmp eax,16
+	cmp eax,12
 	jb ComputeNodeBlockLev0;直接指针
-	sub eax,16
+	sub eax,12
 	cmp eax,1024
 	jb ComputeNodeBlockLev1;一级指针
 	sub eax,1024
@@ -575,9 +647,9 @@ ComputeBootNodeBlock:;计算LMNode所在的块号
 	push eax
 	push 1
 	push 8192
-	mov ecx,[BootNode + 52 + 16 * 4 + 8];三级指针
+	mov ecx,[BootNode + 64 + 12 * 4 + 8];三级指针
 	push ecx
-	call ReadBlock;ReadBlock(BootNode.iBlock[18],8192,1)
+	call ReadBlock;ReadBlock(BootNode.iBlock[14],8192,1)
 	pop eax
 	mov esi,eax
 	shr esi,18
@@ -611,9 +683,9 @@ ComputeNodeBlockLev2:
 	push eax
 	push 1
 	push 8192
-	mov ecx,[BootNode + 52 + 16 * 4 + 4]
+	mov ecx,[BootNode + 64 + 12 * 4 + 4]
 	push ecx
-	call ReadBlock;ReadBlock(BootNode.iBlock[17],8192,1)
+	call ReadBlock;ReadBlock(BootNode.iBlock[13],8192,1)
 	pop eax
 	mov esi,eax
 	shr esi,10
@@ -633,7 +705,7 @@ ComputeNodeBlockLev2:
 	pop esi
 	ret
 ComputeNodeBlockLev1:
-	mov ecx,[BootNode + 52 + 16 * 4];ReadBlock(BootNode.iBlock[16],8192,1)
+	mov ecx,[BootNode + 64 + 12 * 4];ReadBlock(BootNode.iBlock[12],8192,1)
 	push eax
 	push 1
 	push 8192
@@ -649,21 +721,21 @@ ComputeNodeBlockLev1:
 ComputeNodeBlockLev0:
 	shl eax,2
 	mov si,ax
-	mov eax,[BootNode + 52 + si];eax = BootNode.iBlock[eax]
+	mov eax,[BootNode + 64 + si];eax = BootNode.iBlock[eax]
 	pop ecx
 	pop esi
 	ret
 	
 GetBootiBlock:
-	;int GetBootiBlock();
+	;int GetBootiBlock();most 64 iblock
 	push si
 	push di
 	push cx
 	push edx
-	mov si,BootNode + 52
+	mov si,BootNode + 64
 	mov di,BootBlock
-	mov cx,32
-	rep movsw;0-15Block
+	mov cx,22
+	rep movsw;0-11Block
 	lodsd
 	test eax,eax
 	jz GetAllBlockEnd
@@ -672,10 +744,10 @@ GetBootiBlock:
 	push eax
 	call ReadBlock
 	mov si,8192
-	mov cx,96
+	mov cx,104;most 52 iblock
 	rep movsw
 GetAllBlockEnd:
-	mov edx,[BootNode + 24]
+	mov edx,[BootNode + 32]
 	add edx,8191
 	shr edx,12
 	mov ax,dx
@@ -693,15 +765,14 @@ LoadBootFile:
 	mov [BlockCnt],ax
 	mov di,ax
 	mov bx,BootBlock;装载LM到内存，但不展开到对齐
-	mov word [DAP_Buf_Seg],0x5000
+	mov word [DAP_Buf_Seg],RAWFileSreg
 LoadFilel1:
 	test di,di
 	jz LoadFilel0
 	dec di
 	push 1
 	push 0
-	push word [bx + 2]
-	push word [bx]
+	push dword [bx]
 	call ReadBlock
 	add bx,4
 	add word [DAP_Buf_Seg],0x100
@@ -717,7 +788,7 @@ DepressImage:
 	;void DepressImage();
 	pushad
 	
-	mov ax,0x5000
+	mov ax,RAWFileSreg
 	mov ds,ax
 	xor si,si
 	mov si,[si + 0x3c]
@@ -749,7 +820,7 @@ NextSection:
 	jz LoadSectionEnd
 	dec bp
 	mov [ss:SectionRemind],bp
-	mov ax,0x5000
+	mov ax,RAWFileSreg
 	mov ds,ax
 	
 	mov eax,[ds:bx + 12];VirtualAddress
@@ -767,7 +838,7 @@ NextSection:
 	cmova bp,[ss:FirstFreeSeg]
 	mov [ss:FirstFreeSeg],bp
 	
-	add edx,0x50000
+	add edx,RAWFileSreg*16
 	mov si,dx
 	and si,0x0f
 	shr edx,4
@@ -919,7 +990,6 @@ in64bit:
 	mov rax,EntryPoint + (LodSeg << 4)
 	mov rax,[rax]
 	mov ecx,OrginalData
-	;hlt
 	jmp rax
 	
 align 512

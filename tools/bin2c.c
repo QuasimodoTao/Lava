@@ -21,64 +21,6 @@
 #include <stdlib.h>
 #include <time.h>
 
-/*
-int main(int argc,const char * argv[]){
-	const char * in_file = NULL,* out_file = NULL;
-	char * _out_file = NULL,* off;
-	FILE * in,*out;
-	int name_len;
-	struct tm * time_struct;
-	time_t time_stamp;
-	int file_off,byte,size;
-	
-	if(argc <= 1){
-		printk("InFileName [OutFileName].\n");
-		return -1;
-	}
-	if(argc >= 2) in_file = argv[1];
-	if(argc >= 3) out_file = argv[2];
-	if(!out_file){
-		_out_file = malloc((name_len = strlen(in_file)) + 3);
-		strcpy(_out_file,in_file);
-		off = strrchr(_out_file,'\\');
-		if(!off) off = strrchr(_out_file,'/');
-		if(!off) off = _out_file;
-		off = strrchr(off,'.');
-		if(!off){
-			_out_file[name_len] = '.';
-			_out_file[name_len + 1] = 'c';
-			_out_file[name_len + 2] = 0;
-		}
-		else{
-			off++; *off = 'c';
-			off++; *off = 0;
-		}
-		out_file = _out_file;
-	}
-	in = fopen(in_file,"rb");
-	out = fopen(out_file,"w");
-	fseek(out,0,SEEK_SET);
-	time_stamp = time(&time_stamp);
-	time_struct = localtime(&time_stamp);
-	fprintf(out,"//Lava OS\n//PageFault\n//%02d-%02d-%02d-%02d-%02d",time_struct->tm_year%100,
-		time_struct->tm_mon,time_struct->tm_mday,time_struct->tm_hour,time_struct->tm_min);
-	fprintf(out,"\n\n#include <stddef.h>\n\n");
-	fprintf(out,"u8 AP_init[] = {");
-	fseek(in,0,SEEK_SET);
-	file_off = byte = 0;
-	while(file_off < 240){
-		if(!(file_off%8)) fprintf(out,"\n\t");
-		fread(&byte,1,1,in);
-		fprintf(out,"0x%02x,",byte);
-		file_off++;
-	}
-	fprintf(out,"\n};");
-	fclose(in);
-	fclose(out);
-	if(_out_file) free(_out_file);
-	return 0;
-}
-*/
 int main(int argc,const char * argv[]){
 	const char * in_file = NULL,* out_file = NULL;
 	char * _out_file = NULL,* off;

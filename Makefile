@@ -10,9 +10,9 @@ debug : all
 
 all : tools Lava.vhd _boot _lib _ker _lm lm.exe lava.exe
 
-lava.exe : $(KER) Makefile
+lava.exe : $(KER) Makefile tools/dop.exe
 	ld --image-base 0xffff800000100000 -e entry_point -o lava.exe $(KER)
-	dop -O Lava.vhd -f 1 lava.exe lava.sys
+	tools/dop.exe -O Lava.vhd -c /fs/lfs/lava.sys lava.exe 
 
 tools :
 	cd tools && make all
@@ -37,22 +37,19 @@ _boot : boot.bin MBR.bin
 
 lm.exe : $(LM) 
 	ld --image-base 0x10000 -e EntryPoint -o lm.exe -s $(LM)
-	dop -O Lava.vhd -f 1 lm.exe .LM64.SYS
+	tools/dop.exe -O Lava.vhd -c /fs/lfs/lm.sys lm.exe
 	
 boot.bin : boot/boot.asm 
 	nasm -f bin -o boot.bin boot/boot.asm
-	dop -O Lava.vhd -B 1 boot.bin
+	tools/dop.exe -O Lava.vhd -m lfs boot.bin
 
 MBR.bin : boot/MBR.asm 
 	nasm -f bin -o MBR.bin boot/MBR.asm
-	dop -O Lava.vhd -M MBR.bin	
+	tools/dop.exe -O Lava.vhd -M MBR.bin
 
 Lava.vhd :
-	dop -C Lava.vhd 262144
-	dop -O Lava.vhd -F
-	dop -O Lava.vhd -c 65536 131071
-	dop -O Lava.vhd -FP 1 LFS TestPartition
-	-dop -O Lava.vhd -f 1 Font.fnt Font.fnt
+	tools/dop.exe -C Lava.vhd 262144
+	-tools/dop.exe -O Lava.vhd -c /fs/lfs/Font.fnt Font.fnt
 	
 clean :
 	-del lm.exe

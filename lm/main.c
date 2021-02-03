@@ -70,7 +70,6 @@ void __attribute__((noreturn)) EntryPoint(const struct _RELY_MSG_ * Msg){
 	u64 paddr;
 	u32 * _PCMP_;
 	
-	//stop();
 	gui_init(((u64)Msg->ModeSeg) << 4);
 	MemoryStart = ((u64)Msg->FirstFreeSeg) << 4;
 	_Msg = (struct _MSG_ *)0x09fb00;
@@ -304,7 +303,7 @@ void __attribute__((noreturn)) EntryPoint(const struct _RELY_MSG_ * Msg){
 		_Msg->FontBase = MemoryStart;
 	}
 	{//Load Font
-		File = Open(L"Font.fnt");
+		File = Open(L"font.fnt");
 		if(File){
 			Seek(0,SEEK_END,File);
 			Size = Tell(File);

@@ -62,6 +62,8 @@ typedef unsigned short __i16;
 typedef unsigned int __i32;
 typedef unsigned long long __i64;
 
+typedef long long stamp64_t;
+typedef int stamp32_t;
 
 typedef struct _GUID_{
 	int32_t Data1;

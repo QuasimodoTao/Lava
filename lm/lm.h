@@ -26,7 +26,7 @@
 #include <lfs.h>
 
 struct _NODE_ {
-	struct Node pNode;
+	struct LFS_NODE pNode;
 	u32 iNode;
 	u32 iBlock0;
 	u32 iBlock1;
