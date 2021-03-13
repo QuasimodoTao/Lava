@@ -1,3 +1,25 @@
+
+/*
+	tools/dop/fs.h
+	Copyright (C) 2020  Quasimodo
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+*/
+
+
+
 #ifndef _FS_H_
 #define _FS_H_
 #include "dop.h"
@@ -13,9 +35,6 @@
 #ifndef SEEK_END
 #define SEEK_END	2
 #endif
-
-#define FS_LSF_DIR		1
-#define FS_LSF_FILE		2
 
 #define FS_OPEN_READ		0x00000001
 #define FS_OPEN_WRITE		0x00000002

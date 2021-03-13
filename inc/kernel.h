@@ -22,12 +22,12 @@
 
 #include <stddef.h>
 #include <arch.h>
-#include <fs.h>
 #include <asm.h>
 #include <arch.h>
 #include <timer.h>
 #include <spinlock.h>
 #include <int.h>
+#include <fs.h>
 
 #define TF_ACTIVE	0//
 #define TF_BLOCK	1//block by something
@@ -63,10 +63,10 @@ typedef struct _PROCESS_ {
 	struct _THREAD_ * f_thread;
 	struct _PROCESS_ * prev;
 	struct _PROCESS_ * next;
-	struct _STREAM_ * file;
 	const wchar_t * image_name;
 	const wchar_t * short_name;
-	FS_PATH cur_path;
+	struct _SIMPLE_PATH_ cur_path;
+	struct _STREAM_ * file_array[MAX_OPEN_FILE];
 } PROCESS,*LPPROCESS;
 typedef struct _THREAD_ {
 	volatile int gst;
@@ -102,33 +102,14 @@ int wait(int msecond);
 LPPROCESS create_process(const wchar_t * name,void * argv);
 LPTHREAD create_thread(LPPROCESS process,int (*entry)(void*),void*);
 
-void schedule2();
-static inline void schedule_disable(){
-	u64 rf;
-	SFI(rf);
-	lock_bts_private(flags,CPU_FLAGS_SCHEDULE_DISABLE);
-	write_private_dword(schedule_disable_count,read_private_dword(schedule_disable_count) + 1);
-	LF(rf);
-}
-static inline void schedule_enable(){
-	u32 val;
-	u64 rf;
-	SFI(rf);
-	val = read_private_dword(schedule_disable_count);
-	if(val){
-		val--;
-		write_private_dword(schedule_disable_count,val);
-	}
-	if(!val) {
-		lock_btr_private(flags,CPU_FLAGS_SCHEDULE_DISABLE);
-		if(lock_btr_private(flags,CPU_FLAGS_NEED_SCHEDULE)) schedule2();
-	}
-	LF(rf);
-}
-
-#define SD()	schedule_disable()
-#define SE()	schedule_enable()
-
+//must mask interrupt before call schedule_imm();
+void schedule_imm();
+//must mask interrupt before call schedule_imm();
+void schedule_update();
+//must mask interrupt before call schedule_imm();
+void schedule_request();
+static inline void schedule_disable(){lock_bts_private(flags,CPU_FLAGS_SCHEDULE_DISABLE);}
+static inline void schedule_enable(){int ie; ie = IE(); cli(); lock_btr_private(flags,CPU_FLAGS_SCHEDULE_DISABLE);schedule_imm();if(ie) sti();}
 #define GetCurThread()			((LPTHREAD)get_gs_qword(offsetof(struct _PRIVATE_DATA_,cur_thread)))
 #define SetCurThread(Thread)	put_gs_qword(offsetof(struct _PRIVATE_DATA_,cur_thread),(Thread))
 #define GetCurProcess()			((LPPROCESS)get_gs_qword(offsetof(struct _PRIVATE_DATA_,cur_process)))

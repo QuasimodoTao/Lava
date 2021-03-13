@@ -1,3 +1,22 @@
+/*
+	tools/dop/buffer.c
+	Copyright (C) 2020  Quasimodo
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+*/
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stddef.h>
@@ -40,10 +59,10 @@ bits:0,24,32
 */
 
 /*
-BH_ADDR_VAILD = 0;»º³åÇøÊ±¿ÕÏÐµÄ£¬µ«»º³åÇøÎ´Ó³Éä
-BH_DIRTY = 1;»º³åÇøÒÑ¾­±»ÐÞ¸Ä£¬ÐèÒªÐ´»Ø´ÅÅÌ
-BH_BUSY = 1;»º³åÇøÍ·ÕýÔÚ±»Ëø¶¨
-BH_UPDATAING = 1;»º³åÇøÕýÔÚ±»¸üÐÂ£¬¼´ÕýÔÚ·ÃÎÊ´ÅÅÌ
+BH_ADDR_VAILD = 0;ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê±ï¿½ï¿½ï¿½ÐµÄ£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Î´Ó³ï¿½ï¿½
+BH_DIRTY = 1;ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ñ¾ï¿½ï¿½ï¿½ï¿½Þ¸Ä£ï¿½ï¿½ï¿½ÒªÐ´ï¿½Ø´ï¿½ï¿½ï¿½
+BH_BUSY = 1;ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Í·ï¿½ï¿½ï¿½Ú±ï¿½ï¿½ï¿½ï¿½ï¿½
+BH_UPDATAING = 1;ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ú±ï¿½ï¿½ï¿½ï¿½Â£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ú·ï¿½ï¿½Ê´ï¿½ï¿½ï¿½
 */
 
 static int inline mapping(HANDLE dev, iblock_t iblock, uint32_t byte_off) {

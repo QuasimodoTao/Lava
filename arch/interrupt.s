@@ -50,6 +50,8 @@
 .globl __int1e
 .globl __int1f
 
+.globl __init_pit
+
 .globl __irq00
 .globl __irq01
 .globl __irq02
@@ -411,6 +413,27 @@ _int_routine:
     popq %r14
     popq %r15
     iretq
+.align 8
+__init_pit:
+    pushq %rax
+    pushq %rcx
+    pushq %rdx
+    pushq %r8
+    pushq %r9
+    pushq %r10
+    pushq %r11
+    subq $32,%rsp
+    call internal_wait_arise
+    addq $32,%rsp
+    popq %r11
+    popq %r10
+    popq %r9
+    popq %r8
+    popq %rdx
+    popq %rcx
+    popq %rax
+    iretq
+
 
 .align 8
 __irq00:
@@ -991,3 +1014,8 @@ switch_cs:
 	.linkonce	discard
 .refptr.virtualization_exception:
 	.quad	virtualization_exception
+	.section	.rdata$.refptr.internal_wait_arise, "dr"
+	.globl	.refptr.internal_wait_arise
+	.linkonce	discard
+.refptr.internal_wait_arise:
+	.quad	internal_wait_arise

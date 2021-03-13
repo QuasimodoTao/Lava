@@ -65,11 +65,11 @@ struct LFS_HEAD {
 	uint32_t head_size;
 	uint32_t path_len;
 	uint32_t name_len;
-	uint32_t first_free_node;
-	uint32_t first_free_block;//��һ�����еĿ飬�ڵ��
+	volatile uint32_t first_free_node;
+	volatile uint32_t first_free_block;//��һ�����еĿ飬�ڵ��
 	uint32_t block_count;//��ǰ�����еĿ�����
 	uint32_t node_0_block;//0 node,1 root,2 bad,3 map
-	uint32_t free_block_count;//���п�����
+	volatile uint32_t free_block_count;//���п�����
 	stamp64_t create_time;//��������ʽ����ʱ��
 	GUID owner;
 	wchar_t name_path[];
@@ -77,12 +77,12 @@ struct LFS_HEAD {
 struct LFS_NODE {//pack 128 bytes
 	stamp64_t create_time, access_time;
 	stamp64_t modify_time, delete_time;
-	uint64_t file_size;
+	volatile uint64_t file_size;
 	uint16_t attr, links;
 	uint32_t inode;
 	GUID owner;
 	union {
-		uint32_t block[16];
+		volatile uint32_t block[16];
 		uint8_t data[64];//������ݴ�СС�ڵ���160�ֽڣ��򱣴������������
 	};
 };

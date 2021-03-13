@@ -26,6 +26,8 @@
 #include <mm.h>
 #include <int.h>
 #include <graph.h>
+#include <fctrl.h>
+#include <buffer.h>
 
 struct _TASK_{
 	int lock;
@@ -51,12 +53,14 @@ void fs_init();
 void arch_init_ap();
 void private_data_init();
 void syscall_init();
-void serial_init();
+void gui_init();
+void buf_init();
+void file_table_init();
 
+void serial_init();
 void ps2_kbd_init();
 void int86_init();
 void vbe_init();
-void gui_init();
 void pci_init();
 void pit_init();
 void time_init();
@@ -80,39 +84,73 @@ static struct _TASK_ task[] = {
 int lock = 0;
 
 int test_thread(void * none){
-	LPSTREAM serial;
-	char buf[32];
-	LPSTREAM kbd;
-	int ch;
-
+	LPSTREAM test_file;
+	char tmp[256];
 	wprintk(L"测试线程执行成功了。\n");
-	serial = open(L"/.dev/serial/COM1.dev",0);
-	if(serial) wprintk(L"成功打开了 COM1。\n");
-	kbd = open(L"/.dev/ps2_kbd.dev",0);
-	if(kbd) wprintk(L"成功打开了键盘。\n");
-	
-	//while(read(serial,32,buf));
-	//ShowHexs(buf,2);
-	//write(serial,sizeof("This is a test.\n"),"This is a test.\n");
-	
-	while(1){
-		ch = get(kbd);
-		if(ch & KEY_S_LOOSEN) continue;
-		printk("%c.",ch & 0x7f);
+	wait(1000);
+	wprintk(L"等待了1秒钟。\n");
+	test_file = open(L"/system/lava.sys",FS_OPEN_WRITE | FS_OPEN_READ,NULL,NULL);
+	if(test_file) {
+		wprintk(L"打开文件成功了。\n");
+		wprintk(L"%P.\n",test_file);
+		read(test_file,256,tmp);
+		ShowHexs(tmp,256/16);
 	}
+	else wprintk(L"打开文件失败了。\n");
+	while(1) halt();
+}
+int test_thread2(void * none){
+	int i = 0;
+	LPSTREAM hd;
+	struct _BUFFER_HEAD_ * bh1,*bh2;
 
+	cli();
+	hd = open(L"/.dev/ata0.dev",0,NULL,NULL);
+	sti();
+	if(hd){
+		wprintk(L"Thread 2 open hd success.%P.\n",GetCurThread());
+		cli();
+		bh1 = bread(hd,0);
+		sti();
+		printk("thread 2,%P.\n",bh1);
+		cli();
+		bh2 = bread(hd,65536);
+		sti();
+		printk("thread 2,%P,%P.\n",bh1,bh2);	
+	}
 	while(1){
 		//printk("On CPU %d,%d.\n",GetCPUId(),GetCurThread()->id);
 		halt();
 	}
+	//while(1){
+	//	wait(1000);
+	//	i++;
+	//	printk("tick:%d.i:%d.\n",ticks,i);
+	//}
 }
-int test_thread2(void * none){
-	int i = 0;
 
+int test_thread3(void * none){
+	int i = 0;
+	LPSTREAM hd;
+	struct _BUFFER_HEAD_ * bh1,*bh2;
+
+	cli();
+	hd = open(L"/.dev/ata0.dev",0,NULL,NULL);
+	sti();
+	if(hd){
+		wprintk(L"Thread 3 open hd success.%P.\n",GetCurThread());
+		cli();
+		bh1 = bread(hd,65536);
+		sti();
+		printk("thread 3,%P.\n",bh1);
+		cli();
+		bh2 = bread(hd,0);
+		sti();
+		printk("thread 3,%P,%P.\n",bh1,bh2);
+	}
 	while(1){
-		wait(1000);
-		i++;
-		printk("tick:%d.i:%d.\n",ticks,i);
+		//printk("On CPU %d,%d.\n",GetCPUId(),GetCurThread()->id);
+		halt();
 	}
 }
 
@@ -120,6 +158,7 @@ int init_thread_entry(void*none){
 	int i,j;
 	u64 * double_fault_stack;
 	static volatile int finished = 0;
+	static volatile int init = 0;
 
 	sti();
 	spin_unlock_bit(ADDRP2V(PROCESS_INIT_MUTEX),0);
@@ -143,11 +182,12 @@ int init_thread_entry(void*none){
 			xaddd(&finished,1);
 		}
 	}
-	if(!GetCPUId()){
+	if(!spin_try_lock_bit(&init,0)){
 		while(finished < sizeof(task)/sizeof(struct _TASK_)) pause();
 		wprintk(L"欢迎使用Lava OS。\n");
 		create_thread(NULL,test_thread,NULL);
 		//create_thread(NULL,test_thread2,NULL);
+		//create_thread(NULL,test_thread3,NULL);
 	}
 	while(1) halt();
 }
@@ -158,10 +198,10 @@ void __attribute__((noreturn)) ap_entry_point(){//AP start at here
 	lapic_init();
 	apic_enable();
 	put_cr3(create_paging());
+	//stop();
 	schedule_init_ap(init_thread_entry);
 }
 void  __attribute__((noreturn)) entry_point(struct _MSG_ * msg){//BSP start at here
-	
 	processor_count = 0;
 	memcpy(&init_msg,msg,sizeof(struct _MSG_));
 	paging_init_bp(init_msg.MemoryStart + init_msg.ATACount * AHCI_PORT_SPACE_SIZE,init_msg.MemorySize);
@@ -170,9 +210,10 @@ void  __attribute__((noreturn)) entry_point(struct _MSG_ * msg){//BSP start at h
 	sdt_init_bp();
 	private_data_init();
 	syscall_init();
-	fs_init();
 	mp_init();
 	timer_init();
+	buf_init();
+	file_table_init();
 	schedule_init(init_thread_entry);
 }
 

@@ -239,19 +239,19 @@ int64_t LFSInit(int64_t MemoryStart,GUID * ActivePart){
 	if(Header->Revision != 0x00010000) return 0;
 	CRC32 = Header->HeaderCRC32;
 	Header->HeaderCRC32 = 0;
-	if(CRC32 != ComputeCRC32(Header,Header->HeaderSize)){
+	if(CRC32 != ComputeCRC32(0,Header,Header->HeaderSize)){
 		ReadDisk(Header->AlternateLBA,Header,1);
 		if(Header->Signature != 0x5452415020494645) return 0;
 		if(Header->Revision != 0x00010000) return 0;
 		CRC32 = Header->HeaderCRC32;
 		Header->HeaderCRC32 = 0;
-		if(CRC32 != ComputeCRC32(Header,Header->HeaderSize)) return 0;
+		if(CRC32 != ComputeCRC32(0,Header,Header->HeaderSize)) return 0;
 	}
 	CRC32 = Header->PartitionEntryArrayCRC32;
 	EntSize = Header->SizeOfPartitionEntry;
 	EntCnt = Header->NumberOfPartitionEntries;
 	ReadDisk(Header->PartitionEntryLBA,Entry,EntSize * EntCnt / 512);
-	if(CRC32 != ComputeCRC32(Entry,EntSize * EntCnt)) return 0;
+	if(CRC32 != ComputeCRC32(0,Entry,EntSize * EntCnt)) return 0;
 	for(i = 0;i < EntCnt;i++)
 		if(!memcmp(&Entry[i].PatitionGUID,ActivePart,sizeof(GUID))) break;
 	PartFirst = Entry[i].StartLBA;

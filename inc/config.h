@@ -24,17 +24,27 @@
 
 
 //adjustable
-#define MAX_CPU_COUNT		32
-#define IRQ_START_INT       0x20       
-#define IPI_START_INT		0x50
-#define IPI_COUNT			0x10
-#define IRQ_COUNT			48
+#define MAX_CPU_COUNT		        32
+#define IRQ_START_INT               0x20       
+#define IPI_START_INT		        0x50
+#define IPI_COUNT			        0x10
+#define IRQ_COUNT			        48
 //#define VM_DEBUG
 #define IRQ_DE_CHECK
-#define CPU_TIME_UPDATA_IPI	0
-#define CPU_SCHEDULE_IPI    1
-#define CPU_TIME			10
+#define CPU_TIME_UPDATA_IPI	        0
+#define CPU_SCHEDULE_IPI            1
+#define CPU_SCHEDULE_REQUEST_IPI    2
+#define CPU_TIME			        10
+#define MAX_OPEN_FILE               128
+#define BLOCK_DEV_CACHE_SIZE        4096
+#define CHAR_DEV_BUF_SIZE           128
 
+#define CHECK_IF()  \
+{if(IE()){\
+	printk("Interrupt must mask before call %s().\n",__func__);\
+	cli();\
+	halt();\
+}}
 
 //const
 #define FIRST_SELECTOR		0x10                    
@@ -64,7 +74,8 @@
 //0x00000000_00001500 - 0x00000000_000015ff 256B Syscall Int82 Enter DPL3
 //0x00000000_00001600 - 0x00000000_000016ff 256B Syscall Int83 Enter DPL3
 //0x00000000_00001700 - 0x00000000_000017ff 256B Syscall Int84 Enter DPL0
-//0x00000000_00001800 - 0x00000000_00001fff 2KB Reserved
+//0x00000000_00001800 - 0x00000000_00001fff 2KB For buffer module, map table 2
+#define PBHLAB2             0x0000000000001800LL
 //0x00000000_00002000 - 0x00000000_00002fff 4KB PML4
 //0x00000000_00003000 - 0x00000000_00003fff 4KB PDPT
 //0x00000000_00004000 - 0x00000000_00004fff 4KB PDE0
@@ -75,7 +86,9 @@
 #define PIDT_BASE           0x0000000000008000
 //0x00000000_00009000 - 0x00000000_0000afff 8KB GDT
 #define PGDT_BASE           0x0000000000009000
-//0x00000000_0000b000 - 0x00000000_0000ffff 20KB Stack init code
+//0x00000000_0000b000 - 0x00000000_0000cfff 8KB For buffer module, mutex
+#define PBMB                0x000000000000b000
+//0x00000000_0000d000 - 0x00000000_0000ffff 12KB Stack init code
 //0x00000000_00010000 - 0x00000000_0008ffff 512KB For VM model
 #define VM_FREE_SPACE_START		0x10000
 #define VM_FREE_SPACE_SIZE		0x80000
@@ -84,7 +97,14 @@
 //0x00000000_0009fc00 - 0x00000000_0009ffff 1KB EBDA
 //0x00000000_000a0000 - 0x00000000_000bffff 128KB For Video
 //0x00000000_000c0000 - 0x00000000_000fffff 256KB For BIOS
-//0x00000000_00100000 - ?? Kernel image
+//0x00000000_00100000 - 0x00000000_0017ffff 512KB For buffer module, buffer head list array
+#define PBHLAB                  0x0000000000100000LL
+//0x00000000_00180000 - 0x00000000_00180fff 4KB file table first free
+#define PFTFFB                  0x0000000000180000LL
+//0x00000000_00181000 - 0x00000000_00181fff 4KB file table,current max
+#define PFTCMB                  0x0000000000181000LL
+//0x00000000_00182000 - 0x00000000_001fffff 504KB Rvd
+//0x00000000_00200000 - ?? Kernel image
 //?? - ?? Font
 //?? - ?? Config file
 
@@ -102,17 +122,26 @@
 //0x00007fff_fffff000 - 0x00007fff_ffffffff 4KB For system and read only,mapping 0x1000
 #define USER_INIT_RSP               0x00007fffffffeff8
 #define USER_STACK_P4E_INDEX	    255
-//0xffff8000_00000000 - 0xffff807f_ffffffff 256GB Mapping all physical memory
+//0xffff8000_00000000 - 0xffff803f_ffffffff 256GB Mapping all physical memory
 #define PMEMSTART	 	0xffff800000000000LL
-#define PMEMEND			0xffff807fffffffffLL
+#define PMEMEND			0xffff803fffffffffLL
 #define IDT_BASE        (PIDT_BASE | PMEMSTART)
 #define GDT_BASE        (PGDT_BASE | PMEMSTART)
+#define BUF_MUTEX_BASE  (PBMB | PMEMSTART)
+#define BHLAB2          (PBHLAB2 | PMEMSTART)
+#define BHLAB           (PBHLAB | PMEMSTART)
+#define FTFFB           (PFTFFB | PMEMSTART)
+#define FTCMB           (PFTCMB | PMEMSTART)
 //0xffff8040_00000000 - 0xffff8040_007fffff 8MB For thread list
-#define TLB             0xffff804000000000
+#define TLB             0xffff804000000000LL
 #define MAX_THREAD      1024*1024
+//0xffff8040_00800000 - 0xffff8040_00ffffff 8MB Rvd
 //0xffff8040_01000000 - 0xffff8040_01ffffff 16MB Kernel heap control base
 #define MMHMCBB			0xffff804001000000LL
 #define MMHMCBL			0xffff804001fffffcLL
+//0xffff8040_02000000 - 0xffff8040_0f000000 192MB Rvd
+//0xffff8040_10000000 - 0xffff8040_ffffffff 3840MB Rvd
+//0xffff8041_00000000 - 0xffff804f_ffffffff 12GB Rvd
 //0xffff8044_00000000 - 0xffff8047_ffffffff 16GB Kernel heap
 #define MMHSB			0xffff804400000000LL
 //0xffff8048_00000000 - 0xffff804b_ffffffff 16KB * 1024 * 1024 Kernel Stack.
@@ -124,6 +153,12 @@
 //0xffff804c_40000000 - 0xffff804c_7fffffff 1GB for per thread,private heap
 #define MMTHCBB         0xffff804c40000000LL
 #define MMTHCBL         0xffff804c7ffffffcLL
+//0xffff804c_80000000 - 0xffff804c_ffffffff 2GB file table, 2MB per table. Thus this system suppoet up to 1024 disk FS active
+#define FILE_TABLE_BASE 0xffff804c00000000LL
+#define SIZE_PER_FT     0x0000000000200000
+#define FT_TOTAL        1024
+//0xffff804d_00000000 - 0xffff804f_ffffffff 12GB Rvd
+//0xffff8050_00000000 - 0xffff807f_ffffffff 192GB Rvd
 
 #ifdef SPEARATE_STACK
 #define STACK_BASE      0xffff804800000000LL

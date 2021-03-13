@@ -40,7 +40,7 @@ struct _NODE_ {
 };
 
 
-unsigned int ComputeCRC32(void * Data, int Len);
+unsigned int ComputeCRC32(unsigned int crc,void * Data, int Len);
 
 uint8_t lm_PCIReadByte(HANDLE _Dev,uint8_t Reg);
 uint16_t lm_PCIReadWord(HANDLE _Dev,uint8_t Reg);

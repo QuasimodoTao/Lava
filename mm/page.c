@@ -2594,6 +2594,7 @@ PADDR ADDRV2P(LPTHREAD thread,VADDR addr){
 	PADDR paddr;
 	u64 rf;
 	
+	if((u64)addr >= PMEMSTART && (u64)addr <= PMEMEND) return ((u64)addr) & 0x00003fffffffffLL;
 	p4e = P4E(addr);
 	if(p4e >= 256){
 		if(p4e > MAX_P4E){

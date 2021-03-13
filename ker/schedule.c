@@ -50,11 +50,10 @@ static volatile int need_destory = 0;
 spin_optr_def_bit(ProcessGlobalList,&list_busy,PROCESS_LIST_BUSY_BIT);
 
 static int find_first_empty(){
-	u64 page, rf;
+	u64 page;
 	short cur, real, i = 0;
 	
-	rf = sflags();
-	cli();
+	CHECK_IF();
 	if(freshing_cur_max){//如果已经在更新了，就不往里面凑了
 		i = current_thread_max - PAGE_SIZE/sizeof(void*);//已经在更新说明前面没有空的位置了
 		while(freshing_cur_max);
@@ -62,25 +61,18 @@ static int find_first_empty(){
 	while(1){
 		cur = current_thread_max;//获取当前的最大值
 		for(;i < cur;i++)//搜索空位
-			if(!thread_list[i] &&
-				!cmpxchg8b(thread_list + i,NULL,1,NULL)){//抢占空位
-				lflags(rf);
-				return i;//成功返回值
-			}
+			if(!thread_list[i] && !cmpxchg8b(thread_list + i,NULL,1,NULL))return i;//抢占空位,成功返回值
 		freshing_cur_max = 1;//设置正在更新标志
 		if(cmpxchg4b(&current_thread_max,cur,cur + PAGE_SIZE/sizeof(void*),NULL)){//抢占更新权
 			while(freshing_cur_max);//抢占失败则等待
-			if(current_thread_max == cur) {//前后值相等，说明没有更多空位了
-				lflags(rf);
-				return -1;
-			}
+			if(current_thread_max == cur) return -1;//前后值相等，说明没有更多空位了
 			continue;
 		}
 		real = cur;//
 		cur += PAGE_SIZE/sizeof(void*);
 		if(cur > MAX_THREAD){
 			xaddd(&current_thread_max,-(PAGE_SIZE/sizeof(void*)));//恢复值
-			lflags(rf);
+			freshing_cur_max = 0;
 			return -1;
 		}
 		page = get_free_page(0,0,0);//映射页面
@@ -89,12 +81,9 @@ static int find_first_empty(){
 		freshing_cur_max = 0;
 	}
 }
-
 //将进程从进程链表中移出
 void remove_process(LPPROCESS process){
-	u64 rf;
-	
-	SFI(rf);
+	CHECK_IF();	
 	LockProcessGlobalList();//D0
 	process_count--;
 	if(process_list == process) process_list = process->next;
@@ -117,13 +106,11 @@ void remove_process(LPPROCESS process){
 		UnlockProcessLocalList(process->next);//E3
 		UnlockProcessLocalList(process);//E2
 	}
-	LF(rf);
 }
 //将进程插入到链表中
 void insert_process(LPPROCESS process){
 	LPPROCESS _process;
-	u64 rf;
-	SFI(rf);
+	CHECK_IF();
 	LockProcessGlobalList();
 	process_count++;
 	if(process_count == 1){
@@ -157,12 +144,10 @@ void insert_process(LPPROCESS process){
 			UnlockProcessLocalList(process);
 		}
 	}
-	LF(rf);
 }
 //将线程从进程的线程链表中移出
 void remove_process_thread(LPPROCESS process,LPTHREAD thread){
-	u64 rf;
-	SFI(rf);
+	CHECK_IF();
 	LockProcessThread(process);//D0
 	process->thread_count--;
 	if(!process->thread_count){
@@ -191,13 +176,11 @@ void remove_process_thread(LPPROCESS process,LPTHREAD thread){
 			UnlockThreadPList(thread);//E2
 		}
 	}
-	LF(rf);
 }
 //将线程插入到进程的线程链表中
 void insert_process_thread(LPPROCESS process,LPTHREAD thread){
 	LPTHREAD _thread;
-	u64 rf;
-	SFI(rf);
+	CHECK_IF();
 	LockProcessThread(process);//D0
 	process->thread_count++;
 	thread->father = process;
@@ -232,33 +215,29 @@ void insert_process_thread(LPPROCESS process,LPTHREAD thread){
 			UnlockThreadPList(thread);//E3
 		}
 	}
-	LF(rf);	
 }
 
-void schedule2(){
+//must musk interrupt before call
+void schedule_imm(){
 	LPTHREAD old,new;
 	LPTHREAD * next;
 	u64 * pdb;
 	int cur_max;
 	int time = 0;
 	LPPROCESS process;
-	u64 rf;
 	
+	CHECK_IF();
 	lock_btr_private(flags,CPU_FLAGS_NEED_SCHEDULE);
 	write_private_dword(cpu_time,CPU_TIME);
 	while(freshing_cur_max);
 	cur_max = current_thread_max;
-	SFI(rf);
 	old = GetCurThread();
 	next = thread_list + old->solt + 1;
 	while(1){
 		if(next >= thread_list + cur_max){
 			next = thread_list;
 			time++;
-			if(time > 4) {
-				LF(rf);
-				return;
-			}
+			if(time > 4) return;
 		}
 		new = *next;
 
@@ -284,7 +263,6 @@ void schedule2(){
 		//printk("cpu %d,Switch to %d.\n",GetCPUId(),new->id);
 		old = switch_task_b(&(old->rsp),new->rsp,old);
 		UnlockThreadStatus(old);
-		LF(rf);
 		if(old->flag == TF_DESTORY){
 			thread_list[old->solt] = NULL;
 			free_stack(old->stack);
@@ -293,37 +271,37 @@ void schedule2(){
 		return;
 	}
 }
-static int updata_schedule_receive(){
+//must musk interrupt before call
+static int schedule_update_recive(){
 	int i;
-	
-	xaddd(&updata_count,1);
-	if(!need_updata_schedule){
-		if(xaddd(&updata_count,-1) == 1) need_updata_schedule = 0;
-		return -1;
-	}
-	if((i = read_private_dword(cpu_time)) > 0){
-		write_private_dword(cpu_time,i-1);
-		if(xaddd(&updata_count,-1) == 1) need_updata_schedule = 0;
-		return 0;
-	}
-	lock_bts_private(flags,CPU_FLAGS_NEED_SCHEDULE);
-	if(lock_bt_private(flags,CPU_FLAGS_SCHEDULE_DISABLE)) return;
-	schedule2();
-	if(xaddd(&updata_count,-1) == 1) need_updata_schedule = 0;
+
+	CHECK_IF();
+	if((i = read_private_dword(cpu_time)) > 0) write_private_dword(cpu_time,i-1);
+	else lock_bts_private(flags,CPU_FLAGS_NEED_SCHEDULE);
+	if(xaddd(&updata_count,-1) == 1)need_updata_schedule = 0;
 	return 0;
 }
-void schedule(){
-	int i;
-	updata_count = 0;
-	need_updata_schedule = 1;
-	send_ipi(CPU_TIME_UPDATA_IPI,0,1,IPIM_ALL_EX);
-	if((i = read_private_dword(cpu_time)) > 0){
-		write_private_dword(cpu_time,i-1);
-		return;
-	}
+//must musk interrupt before call
+static int schedule_request_recive(){
+	CHECK_IF();
 	lock_bts_private(flags,CPU_FLAGS_NEED_SCHEDULE);
-	if(lock_bt_private(flags,CPU_FLAGS_SCHEDULE_DISABLE)) return;
-	schedule2();
+	return 0;
+}
+//must musk interrupt before call
+void schedule_update(){
+	int i;
+
+	CHECK_IF();
+	if(cmpxchg4b(&updata_count,0,process_count,NULL)) send_ipi(CPU_TIME_UPDATA_IPI,0,1,IPIM_ALL_EX);
+	if((i = read_private_dword(cpu_time)) > 0) write_private_dword(cpu_time,i-1);
+	else lock_bts_private(flags,CPU_FLAGS_NEED_SCHEDULE);
+	if(xaddd(&updata_count,-1) == 1)need_updata_schedule = 0;
+	return 0;
+}
+//must musk interrupt before call
+void schedule_request(){
+	CHECK_IF();
+	send_ipi(CPU_SCHEDULE_REQUEST_IPI,0,1,IPIM_ALL_EX);
 }
 void __attribute__((noreturn)) exit(int code){
 	LPTHREAD thread;
@@ -331,8 +309,9 @@ void __attribute__((noreturn)) exit(int code){
 	thread = GetCurThread();
 	free_area(thread,0x00007f8000000000,0x0000007ffffff000);
 	process = thread->father;
+	process->ret = code;
+	cli();
 	remove_process_thread(process,thread);
-	thread->father->ret = code;
 	if(!process->thread_count){
 		free_page_table(process);
 		if(process->image_name) kfree(process->image_name);
@@ -342,10 +321,9 @@ void __attribute__((noreturn)) exit(int code){
 			kfree(process);
 		}
 	}
-	cli();
 	thread->flag = TF_DESTORY;
 	thread_list[thread->solt] = NULL;
-	schedule2();
+	schedule_imm();
 }
 int kill(LPTHREAD thread){
 	if(!thread || thread == GetCurThread()) exit(ERR_BE_DESTORY);
@@ -360,31 +338,32 @@ int wake_up(LPTHREAD thread){
 
 	if(!thread || !addr_vaild(NULL,thread) || thread->gst != GST_THREAD) return ERR_INVAILD_PTR;
 	thread->flag = TF_ACTIVE;
-	schedule();
+	schedule_request();
 	return 0;
 }
 static void wait_call_back(LPTIMER timer,LPTHREAD thread){
 	thread->wait_state = TFW_OUT_OF_TIME;
 	thread->flag = TF_ACTIVE;
-	schedule();
+	schedule_request();
 }
 int wait(int msecond){
 	LPTHREAD thread;
 	LPTIMER timer;
 	int ret;
-	u64 rf;
+	int ie;
 
 	thread = GetCurThread();
-	SFI(rf);
-	thread->flag = TF_BLOCK;
+	ie = IE();
+	cli();
 	if(msecond){
 		timer = timer_alloc(msecond,TMR_MOD_ONCE,wait_call_back,thread);
 		timer_start(timer);
-		schedule2();
+		thread->flag = TF_BLOCK;
+		schedule_imm();
 		timer_free(timer);
 	}
-	else schedule2();
-	LF(rf);
+	else schedule_imm();
+	if(ie) sti();
 	if(thread->need_destory) exit(ERR_BE_DESTORY);
 	return 0;
 }
@@ -398,12 +377,12 @@ int destory_mutex(struct _MUTEX_ * mutex){
 	while(thread = mutex->wait.t){//逐个唤醒正在等待的线程
 		thread->wait_state = TFW_RESOURCE_DESTORY;
 		thread->flag = TF_ACTIVE;
-		schedule();
+		schedule_request();
 	}
 	while(thread = mutex->release.t){
 		thread->wait_state = TFW_RESOURCE_DESTORY;
 		thread->flag = TF_ACTIVE;
-		schedule();
+		schedule_request();
 	}
 	if(mutex->flags & MUTEX_ALLOC) kfree(mutex);//释放信号量
 	return 0;
@@ -423,23 +402,24 @@ struct _MUTEX_ * create_mutex_ex(int locked,struct _MUTEX_ * mutex){//创建一�
 static void mutex_timer_call_back(LPTIMER timer,LPTHREAD thread){//线程等待超时时则调用此函数，唤醒线程
 	thread->wait_state = TFW_OUT_OF_TIME;
 	thread->flag = TF_ACTIVE;
-	schedule();
+	schedule_request();
 }
 int wait_mutex(struct _MUTEX_ * mutex,int time){//抢占资源
 	LPTHREAD thread;
 	LPTHREAD * prev = NULL;
 	volatile LPTHREAD next = NULL;
 	LPTIMER timer;
-	u64 rf;
+	int ie;
 
 	if(!mutex) return ERR_INVAILD_PTR;//非法指针
 	thread = GetCurThread();
-	SFI(rf);//关中断
+	ie = IE();
+	cli();//关中断
 	LockMutex(mutex);//抢占信号量
 	if(mutex->wait.t || mutex->flags & MUTEX_LOCKED){//若资源不足或已有线程在等待（服从先到先服务）
 		if(!time){//不等待则直接返回资源不足
 			UnlockMutex(mutex);
-			LF(rf);
+			if(ie) sti();
 			return ERR_RESOURCE_BUSY;
 		}
 		thread->flag = TF_BLOCK;
@@ -449,18 +429,20 @@ int wait_mutex(struct _MUTEX_ * mutex,int time){//抢占资源
 		if(!mutex->wait.t) mutex->wait.t = thread;
 		thread->wait_state = 0;
 		UnlockMutex(mutex);
+		if(ie) sti();
 		if(time != -1){//有限等待则重启计时器
 			timer = timer_alloc(time,TMR_MOD_ONCE,mutex_timer_call_back,thread);
 			timer_start(timer);
 		}
-		LF(rf);
-		schedule2();//调度
+		cli();
+		schedule_imm();//调度
+		if(ie) sti();
 		if(time != -1) timer_free(timer);
 		if(thread->wait_state == TFW_RESOURCE_DESTORY) {//若信号量正在销毁，则返回 无效的指针//if mutex is killing, just return is enough;
 			mutex->wait.t = next;
 			return ERR_INVAILD_PTR;
 		}
-		SFI(rf);
+		cli();
 		LockMutex(mutex);
 		if(thread->wait_state == TFW_OUT_OF_TIME) {//wake up because of out of time;
 	///		//Might i am not the first one	
@@ -474,7 +456,7 @@ int wait_mutex(struct _MUTEX_ * mutex,int time){//抢占资源
 				if(prev) *prev = next;
 			}
 			UnlockMutex(mutex);
-			LF(rf);
+			if(ie) sti();
 			return ERR_RESOURCE_BUSY;
 		}
 	///	//wake up because resource is enough;
@@ -488,10 +470,10 @@ int wait_mutex(struct _MUTEX_ * mutex,int time){//抢占资源
 		if(!next) mutex->release.p = NULL;
 	}
 	UnlockMutex(mutex);
-	LF(rf);
+	if(ie) sti();
 	if(thread) {
 		thread->flag = TF_ACTIVE;	
-		schedule();
+		schedule_request();
 	}
 	return 0;
 }
@@ -500,16 +482,17 @@ int release_mutex(struct _MUTEX_ * mutex,int time){
 	LPTHREAD * prev = NULL;
 	volatile LPTHREAD next = NULL;
 	LPTIMER timer;
-	u64 rf;
+	int ie;
 	
 ///	if(heckArgument()) return ERR;
 	if(!mutex) return ERR_INVAILD_PTR;
-	SFI(rf);
+	ie = IE();
+	cli();
 	LockMutex(mutex);
 	if(mutex->flags & MUTEX_LOCKED || mutex->release.t){
 		if(!time){
 			UnlockMutex(mutex);
-			LF(rf);
+			if(ie) sti();
 			return ERR_RESOURCE_BUSY;
 		}
 		thread = GetCurThread();
@@ -520,13 +503,14 @@ int release_mutex(struct _MUTEX_ * mutex,int time){
 		if(!mutex->release.t) mutex->release.t = thread;
 		thread->wait_state = 0;
 		UnlockMutex(mutex);
+		if(ie) sti();
 		if(time != -1){//有限等待则重启计时器
 			timer = timer_alloc(time,TMR_MOD_ONCE,mutex_timer_call_back,thread);
 			timer_start(timer);
 		}
-		LF(rf);
-		write_private_dword(cpu_time,0);
-		schedule2();
+		cli();
+		schedule_imm();
+		if(ie) sti();
 		if(time != -1) timer_free(timer);
 		if(thread->wait_state == TFW_RESOURCE_DESTORY) {
 			mutex->release.t = next;
@@ -537,9 +521,8 @@ int release_mutex(struct _MUTEX_ * mutex,int time){
 ///			return ERR;
 ///		}
 		thread = GetCurThread();
-		SFI(rf);
+		cli();
 		LockMutex(mutex);
-		
 		if(thread->wait_state == TFW_OUT_OF_TIME) {//wake up because of out of time;
 	///		//Might i am not the first one	
 			if(thread == mutex->release.t){//if i am first one;
@@ -552,7 +535,7 @@ int release_mutex(struct _MUTEX_ * mutex,int time){
 				if(prev) *prev = next;
 			}
 			UnlockMutex(mutex);
-			LF(rf);
+			if(ie) sti();
 			return ERR_RESOURCE_BUSY;
 		}
 	///	//wake up because resource is enough;
@@ -567,14 +550,13 @@ int release_mutex(struct _MUTEX_ * mutex,int time){
 		if(!next) mutex->wait.p = NULL;
 	}
 	UnlockMutex(mutex);
-	LF(rf);
+	if(ie) sti();
 	if(thread) {
 		thread->flag = TF_ACTIVE;
-		schedule();	
+		schedule_request();
 	}
 	return 0;
 }
-
 int destory_semaphore(struct _SEMAPHORE_ * se){
 	struct _THREAD_ * thread,*thread2;
 	
@@ -583,10 +565,12 @@ int destory_semaphore(struct _SEMAPHORE_ * se){
 	while(thread = se->wait.p){//逐个唤醒正在等待的线程
 		thread->wait_state = TFW_RESOURCE_DESTORY;
 		thread->flag = TF_ACTIVE;
+		schedule_request();
 	}
 	while(thread = se->release.p){
 		thread->wait_state = TFW_RESOURCE_DESTORY;
 		thread->flag = TF_ACTIVE;
+		schedule_request();
 	}
 	if(se->flags & SE_ALLOC) kfree(se);//释放信号量
 	return 0;
@@ -607,24 +591,25 @@ struct _SEMAPHORE_ * create_semaphore_ex(int max,int cur,struct _SEMAPHORE_ * se
 static void semaphore_timer_call_back(LPTIMER timer,LPTHREAD thread){//线程等待超时时则调用此函数，唤醒线程
 	thread->wait_state = TFW_OUT_OF_TIME;
 	thread->flag = TF_ACTIVE;
-	schedule();
+	schedule_request();
 }
 int wait_semaphore(int val,struct _SEMAPHORE_ * se,int time){//抢占资源
 	LPTHREAD thread;
 	LPTHREAD * prev = NULL;
 	LPTHREAD next = NULL;
 	LPTIMER timer;
-	u64 rf;
+	int ie;
 
 	if(!se) return ERR_INVAILD_PTR;//非法指针
 	if(!val) return 0;//不抢占任何资源则直接返回
 	if(val > se->max) return ERR_OUT_OF_RANGE;//抢占超过总数的资源
-	SFI(rf);//关中断
+	ie = IE();
+	cli();//关中断
 	LockSemaphore(se);//抢占信号量
 	if(se->wait.t || se->cur < val){//若资源不足或已有线程在等待（服从先到先服务）
 		if(!time){//不等待则直接返回资源不足
 			UnlockSemaphore(se);
-			LF(rf);
+			if(ie) sti();
 			return ERR_RESOURCE_BUSY;
 		}
 		thread = GetCurThread();
@@ -636,18 +621,20 @@ int wait_semaphore(int val,struct _SEMAPHORE_ * se,int time){//抢占资源
 		thread->semaphore_val = val;
 		thread->wait_state = 0;
 		UnlockSemaphore(se);
-		LF(rf);
+		if(ie) sti();
 		if(time != -1){//有限等待则重启计时器
 			timer = timer_alloc(time,TMR_MOD_ONCE,semaphore_timer_call_back,thread);
 			timer_start(timer);
 		}
-		schedule2();//调度
+		cli();
+		schedule_imm();//调度
+		if(ie) sti();
 		if(time != -1) timer_free(timer);
 		if(thread->wait_state == TFW_RESOURCE_DESTORY) {//若信号量正在销毁，则返回 无效的指针
 			se->wait.t = next;
 			return ERR_INVAILD_PTR;
 		}
-		SFI(rf);
+		cli();
 		LockSemaphore(se);
 		if(thread->wait_state == TFW_OUT_OF_TIME) {
 			if(thread == se->wait.t){
@@ -660,7 +647,7 @@ int wait_semaphore(int val,struct _SEMAPHORE_ * se,int time){//抢占资源
 				if(prev) *prev = next;
 			}
 			UnlockSemaphore(se);
-			LF(rf);
+			if(ie) sti();
 			return ERR_RESOURCE_BUSY;
 		}
 		se->wait.t = next;
@@ -672,17 +659,17 @@ int wait_semaphore(int val,struct _SEMAPHORE_ * se,int time){//抢占资源
 		se->release.t = next;
 		if(!next) se->release.p = NULL;
 		thread->flag = TF_ACTIVE;
-		schedule();
+		schedule_request();
 	}
 	if(se->wait.t && se->cur >= se->wait.t->semaphore_val) {
 		thread = se->wait.t;
 		se->wait.t = next;
 		if(!next) se->wait.p = NULL;
 		thread->flag = TF_ACTIVE;
-		schedule();
+		schedule_request();
 	}
 	UnlockSemaphore(se);
-	LF(rf);
+	if(ie) sti();
 	return 0;
 }
 int release_semaphore(int val,struct _SEMAPHORE_ * se,int time){
@@ -690,17 +677,18 @@ int release_semaphore(int val,struct _SEMAPHORE_ * se,int time){
 	LPTHREAD * prev = NULL;
 	volatile LPTHREAD next = NULL;
 	LPTIMER timer;
-	u64 rf;
+	int ie;
 	
 	if(!se) return ERR_INVAILD_PTR;
 	if(!val) return 0;
 	if(val > se->max) return ERR_OUT_OF_RANGE;
-	SFI(rf);
+	ie = IE();
+	cli();
 	LockSemaphore(se);
 	if(se->cur + val > se->max || se->release.t){
 		if(!time){
 			UnlockSemaphore(se);
-			LF(rf);
+			if(ie) sti();
 			return ERR_RESOURCE_BUSY;
 		}
 		thread = GetCurThread();
@@ -712,18 +700,20 @@ int release_semaphore(int val,struct _SEMAPHORE_ * se,int time){
 		thread->semaphore_val = val;
 		thread->wait_state = 0;
 		UnlockSemaphore(se);
-		LF(rf);
+		if(ie) sti();
 		if(time != -1){//有限等待则重启计时器
 			timer = timer_alloc(time,TMR_MOD_ONCE,semaphore_timer_call_back,thread);
 			timer_start(timer);
 		}
-		schedule2();
+		cli();
+		schedule_imm();
+		if(ie) sti();
 		if(time != -1) timer_free(timer);
 		if(thread->wait_state == TFW_RESOURCE_DESTORY) {//若信号量正在销毁，则返回 无效的指针
 			se->release.t = next;
 			return ERR_INVAILD_PTR;
 		}
-		SFI(rf);
+		cli();
 		LockSemaphore(se);
 		if(thread->wait_state == TFW_OUT_OF_TIME) {
 			if(thread == se->release.t){
@@ -736,7 +726,7 @@ int release_semaphore(int val,struct _SEMAPHORE_ * se,int time){
 				if(prev) *prev = next;
 			}
 			UnlockSemaphore(se);
-			LF(rf);
+			if(ie) sti();
 			return ERR_RESOURCE_BUSY;
 		}
 		se->release.t = next;
@@ -748,20 +738,19 @@ int release_semaphore(int val,struct _SEMAPHORE_ * se,int time){
 		se->wait.t = next;
 		if(!next) se->wait.p = NULL;
 		thread->flag = TF_ACTIVE;
-		schedule();
+		schedule_request();
 	}
 	if(se->release.t && se->cur >= se->release.t->semaphore_val) {
 		thread = se->release.t;
 		se->release.t = next;
 		if(!next) se->release.p = NULL;
 		thread->flag = TF_ACTIVE;
-		schedule();
+		schedule_request();
 	}
 	UnlockSemaphore(se);
-	LF(rf);
+	if(ie) sti();
 	return 0;
 }
-
 static void thread_entry(int (*entry)(void*),LPTHREAD old){
 	LPSTREAM image;
 	LPPROCESS process;
@@ -795,6 +784,7 @@ LPPROCESS create_process(const wchar_t * name,void * argv){
 	u64 * stack;
 	size_t name_len;
 	wchar_t * _name,*__name,*___name;
+	int ie;
 	
 	{//initlize process data
 		process = kmalloc(sizeof(PROCESS),0);
@@ -838,15 +828,19 @@ LPPROCESS create_process(const wchar_t * name,void * argv){
 	}
 	put_page(0x1000 | PAGE_EXIST | PAGE_USER,thread,0x00007ffffffff000);
 	allocate_area(thread,0x00007f8000000000,0x0000007ffffff000,PAGE_WRITE | PAGE_USER);
+	ie = IE();
+	cli();
 	insert_process_thread(process,thread);
 	insert_process(process);
 	thread->solt = find_first_empty();
+	if(ie) sti();
 	thread_list[thread->solt] = thread;
 	return process;
 }
 LPTHREAD create_thread(LPPROCESS process,int (*entry)(void*),void * argv){
 	LPTHREAD thread,_thread;
 	u64 * stack;
+	int ie;
 
 	if(!process) process = GetCurProcess();
 	{//initlize thread status.
@@ -874,8 +868,11 @@ LPTHREAD create_thread(LPPROCESS process,int (*entry)(void*),void * argv){
 	}
 	put_page(0x1000 | PAGE_EXIST | PAGE_USER,thread,0x00007ffffffff000);
 	allocate_area(thread,0x00007f8000000000,0x0000007ffffff000,PAGE_WRITE | PAGE_USER);
+	ie = IE();
+	cli();
 	insert_process_thread(process,thread);
 	thread->solt = find_first_empty();
+	if(ie) sti();
 	//printk("create %P.",thread);
 	thread_list[thread->solt] = thread;
 	return thread;
@@ -884,12 +881,16 @@ int shell(const wchar_t * name,void * argv){
 	LPPROCESS process;
 	LPTHREAD thread;
 	int ret;
+	int ie;
 	
 	process = create_process(name,argv);
+	ie = IE();
+	cli();
 	process->by_shell = 1;
 	thread = GetCurThread();
 	thread->flag = TF_BLOCK;
-	schedule2();
+	schedule_imm();
+	if(ie) sti();
 	ret = process->ret;
 	if(process->image_name) kfree(process->image_name);
 	kfree(process);
@@ -901,9 +902,8 @@ void __attribute__((noreturn)) schedule_init_ap(int (*entry)(void*),void * argv)
 	LPPROCESS process;
 	u64 * stack;
 	u64 __rsp;
-	u64 rf;
 	
-	SFI(rf);
+	CHECK_IF();
 	{//initlize thread status.
 		thread = kmalloc(sizeof(THREAD),0);
 		memset(thread,0,sizeof(THREAD));
@@ -939,7 +939,6 @@ void __attribute__((noreturn)) schedule_init_ap(int (*entry)(void*),void * argv)
 	SetCurProcess(process);
 	SetCurThread(thread);
 	LockThreadStatus(thread);
-	LF(rf);
 	thread_exit(__rsp,entry,NULL);
 }
 void __attribute__((noreturn)) schedule_init(int (*entry)(void*),void * argv){
@@ -948,9 +947,11 @@ void __attribute__((noreturn)) schedule_init(int (*entry)(void*),void * argv){
 	u64 * stack;
 	u64 __rsp;
 	
+	CHECK_IF();
 	//enable other processor(s) to schedule
-	request_ipi(CPU_TIME_UPDATA_IPI,updata_schedule_receive);
+	request_ipi(CPU_TIME_UPDATA_IPI,schedule_update_recive);
 	request_ipi(CPU_SCHEDULE_IPI,NULL);
+	request_ipi(CPU_SCHEDULE_REQUEST_IPI,schedule_request_recive);
 	{//process 0
 		process = kmalloc(sizeof(PROCESS),0);
 		memset(process,0,sizeof(PROCESS));
@@ -979,7 +980,6 @@ void __attribute__((noreturn)) schedule_init(int (*entry)(void*),void * argv){
 	SetCurThread(thread);
 	write_private_dword(cpu_time,CPU_TIME);
 	LockThreadStatus(thread);
-	SE();
 	thread_exit(__rsp,entry,NULL);
 }
 

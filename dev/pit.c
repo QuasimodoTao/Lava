@@ -23,9 +23,10 @@
 #include <kernel.h>
 #include <timer.h>
 #include <eisa.h>
+#include <config.h>
 
-#define PIT_CMD		0x43
 #define PIT_DIV		1193
+#define idt					((u64*)IDT_BASE)
 
 //1.1931816666 MHz
 //999847746012fs
@@ -34,24 +35,29 @@ static volatile int wait_nock;
 static volatile int nock;
 static volatile int mask;
 
+void __init_pit(void);
+void make_gate(int vector,u64 addr,int ist,int dpl,int type);
+void inter_eoi();
 
-
-
-static int internel_wait_handle(int irq){
+void internal_wait_arise(){
 	wait_nock = 1;
-	return 0;
+	inter_eoi();
 }
 
 void internel_wait(int usecond){
 	volatile u64 val;
 	u64 flags;
 	u64 rf;
+	u64 dpl,dph;
 	
 	val = (1193182 * usecond);
 	val /= 1000000;
 	val++;
 	wait_nock = 0;
-	request_irq(EISA_TIMER_IRQ,internel_wait_handle);
+
+	dpl = idt[(IRQ_START_INT + EISA_TIMER_IRQ) * 2];
+	dph = idt[(IRQ_START_INT + EISA_TIMER_IRQ) * 2 + 1];
+	make_gate(IRQ_START_INT + EISA_TIMER_IRQ,__init_pit,0,0,GATE_TYPE_INT);
 	SFI(rf);
 	outb(EISA_PIT1_CTRL_PORT,EISA_PIT_SELECT_CH0 | EISA_PIT_LOW_HI |
 		EISA_PIT_MODE2 | EISA_PIT_BIN);
@@ -63,7 +69,8 @@ void internel_wait(int usecond){
 	cli();
 	irq_disable(EISA_TIMER_IRQ);
 	LF(rf);
-	reject_irq(EISA_TIMER_IRQ,internel_wait_handle);
+	idt[(IRQ_START_INT + EISA_TIMER_IRQ) * 2] = dpl;
+	idt[(IRQ_START_INT + EISA_TIMER_IRQ) * 2 + 1] = dph;
 }
 static int pit_handle(int irq){
 	if(mask){

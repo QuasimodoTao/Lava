@@ -23,57 +23,63 @@
 #include <asm.h>
 #include <stdio.h>
 #include <kernel.h>
+#include <config.h>
+#include <fs.h>
+#include <fctrl.h>
 
-#define FS_MAP_DIR	0
-#define FS_MAP_DEV	1
-#define FS_MAP_FS	3
+#define FS_MAP_DIR				0
+#define FS_MAP_DEV				1
+#define FS_MAP_FS				2
+#define FS_MAP_INVAILD			3
+#define FS_MAP_FREE				4
 
 #define FS_MAP_DIR_MIN_LEN	7
 
 struct _DIR_ {
 	union {
 		struct {
-			u8 len;
-			u8 type;
+			u8 len, type;
 			wchar_t name[FS_MAP_DIR_MIN_LEN];
 		} min;
 		struct {
-			u8 len;
-			u8 type;
+			u8 len, type;
 			wchar_t * name;
 		} max;
 	};
-	struct _DIR_ * next;
+	volatile struct _DIR_ * next;
 	union {
 		LPFCPEB fc;
-		LPPCPEB pc;
+		LPSIMPLE_PATH path;
 		struct _DIR_ * son;
 	};
 };
 
 #define DirName(dir)	(((dir)->min.len <= FS_MAP_DIR_MIN_LEN) ? (dir)->min.name : (dir)->max.name)
 
-static LPSTREAM root_open(wchar_t * name,u64 mode,FS_PATH * cur_path);
-static int root_seek(wchar_t * path,struct _FS_PATH_ * dpath,struct _FS_PATH_ * cur_path);
-static int root_catalog(wchar_t * path,LPCATALOG buf,struct _FS_PATH_ * cur_path);
+static LPSTREAM root_open(wchar_t * name,u64 mode,LPSIMPLE_PATH cur_path);
+static int root_seek(wchar_t * path,LPSIMPLE_PATH dest_path,LPSIMPLE_PATH my_path);
+static int root_cat(LPCATALOG buf,size_t size,LPSIMPLE_PATH cur_path);
+static int root_exist(wchar_t * path,LPSIMPLE_PATH cur_path);
 
-static struct _DIR_ * root;
-static int lock;
-static PCPEB root_pc = {root_open,NULL,root_seek,root_catalog,NULL,NULL,NULL,NULL,NULL,NULL};
-static FS_PATH root_path;
+static LPSTREAM * stream_zone = NULL;
+static struct _DIR_ root = {
+	.min.len = 1,
+	.min.type = FS_MAP_DIR,
+	.min.name[0] = L'.',
+	.next = &root,
+	.son = &root
+};
+static FSCTRL root_ctrl = {.open = root_open,.seek = root_seek,.exist = root_exist,.cat = root_cat};
+static SIMPLE_PATH root_path = {.data = &root,.fs = &root_ctrl};
+static volatile uint16_t create_lock = 0;
 
-#define Lock()		spin_lock_bit(&lock,0)
-#define TryLock()	spin_try_lock_bit(&lock,0)
-#define Unlock()	spin_unlock_bit(&lock,0)
-
-static LPSTREAM root_open(wchar_t * name,u64 mode,FS_PATH * cur_path){
+static LPSTREAM root_open(wchar_t * name,u64 mode,LPSIMPLE_PATH cur_path){
 	wchar_t *path,*tpath;
 	struct _DIR_ * cur,*first;
 	size_t name_len;
 	
 	cur = cur_path->data;
 	path = name;
-	SD();Lock();
 	while(1){
 		name = path;
 		tpath = wcschr(path,L'\\');
@@ -82,20 +88,21 @@ static LPSTREAM root_open(wchar_t * name,u64 mode,FS_PATH * cur_path){
 		first = cur;
 		path = tpath + 1;
 		while(1){
-			if(cur->min.len == name_len && !wcsncmp(DirName(cur),name,name_len)){
+			if(cur->min.type != FS_MAP_FREE && 
+				cur->min.type != FS_MAP_INVAILD && 
+				cur->min.len == name_len && 
+				!wcsncmp(DirName(cur),name,name_len)){
 				if(cur->min.type == FS_MAP_FS) {
-					Unlock(); SE();
-					if(!cur->pc || !cur->pc->open1) return NULL;
-					else return cur->pc->open1(path,mode,cur->pc);
+					if(!cur->path || !cur->path->fs || !cur->path->fs->open) return NULL;
+					else return cur->path->fs->open(path,mode,cur->path);
 				}
 				else if(cur->min.type == FS_MAP_DEV){
-					Unlock(); SE();
-					if(!cur->fc || !cur->fc->open)return NULL;
+					if(!cur->fc || !cur->fc->open) return NULL;
 					else return cur->fc->open(path,mode,cur->fc);
 				}
 				else break;
 			}
-			if(cur->next == first){ Unlock(); SE();return NULL; }
+			if(cur->next == first) return NULL; 
 			cur = cur->next;
 		}
 		cur = cur->son;
@@ -104,33 +111,32 @@ static LPSTREAM root_open(wchar_t * name,u64 mode,FS_PATH * cur_path){
 	first = cur;
 	path = tpath + 1;
 	while(1){
-		if(cur->min.len == name_len && !wcsncmp(DirName(cur),name,name_len)){
+		if(cur->min.type != FS_MAP_FREE && 
+			cur->min.type != FS_MAP_INVAILD && 
+			cur->min.len == name_len && 
+			!wcsncmp(DirName(cur),name,name_len)){
 			if(cur->min.type == FS_MAP_FS) {
-				Unlock(); SE();
-				if(!cur->pc || !cur->pc->open1) return NULL;
-				else return cur->pc->open1(NULL,mode,cur->pc);
+				if(!cur->path || !cur->path->fs || !cur->path->fs->open) return NULL;
+				else return cur->path->fs->open(NULL,mode,cur->path);
 			}
 			else if(cur->min.type == FS_MAP_DEV){
-				Unlock(); SE();
 				if(!cur->fc || !cur->fc->open) return NULL;
 				else return cur->fc->open(NULL,mode,cur->fc);
 			}
-			else { SE(); Unlock(); return NULL; }
+			else return NULL; 
 		}
-		if(cur->next == first){SE(); Unlock(); return NULL; }
+		if(cur->next == first) return NULL; 
 		cur = cur->next;
 	}
-	Unlock(); SE();
 	return NULL;
 }
-static int root_seek(wchar_t * path,struct _FS_PATH_ * dpath,struct _FS_PATH_ * cur_path){
+static int root_seek(wchar_t * path,LPSIMPLE_PATH dest_path,LPSIMPLE_PATH my_path){
 	wchar_t *tpath,*name;
 	struct _DIR_ * cur,*prev,*first;
 	size_t name_len;
 	int ret;
 	
-	cur = cur_path->data;
-	SD(); Lock();
+	cur = my_path->data;
 	while(1){
 		name = path;
 		tpath = wcschr(path,L'\\');
@@ -139,15 +145,17 @@ static int root_seek(wchar_t * path,struct _FS_PATH_ * dpath,struct _FS_PATH_ * 
 		first = cur;
 		path = tpath + 1;
 		while(1){
-			if(cur->min.len == name_len && !wcsncmp(DirName(cur),name,name_len)){
+			if(cur->min.type != FS_MAP_FREE &&
+				cur->min.type != FS_MAP_INVAILD &&
+				cur->min.len == name_len && 
+				!wcsncmp(DirName(cur),name,name_len)){
 				if(cur->min.type == FS_MAP_FS) {
-					Unlock(); SE();
-					if(!cur->pc || !cur->pc->seek) return -1;
-					else return cur->pc->seek(path,dpath,cur->pc);
+					if(!cur->path || !cur->path->fs || !cur->path->fs->seek) return -1;
+					else return cur->path->fs->seek(path,dest_path,cur->path);
 				}
 				else if(cur->min.type == FS_MAP_DIR) break;
 			}
-			if(cur->next == first){ Unlock(); SE(); return -1; }
+			if(cur->next == first) return -1; 
 			cur = cur->next;
 		}
 		cur = cur->son;
@@ -156,82 +164,36 @@ static int root_seek(wchar_t * path,struct _FS_PATH_ * dpath,struct _FS_PATH_ * 
 	first = cur;
 	path = tpath + 1;
 	while(1){
-		if(cur->min.len == name_len && !wcsncmp(DirName(cur),name,name_len)){
+		if(cur->min.type != FS_MAP_FREE &&
+			cur->min.type != FS_MAP_INVAILD &&
+			cur->min.len == name_len && 
+			!wcsncmp(DirName(cur),name,name_len)){
 			if(cur->min.type == FS_MAP_FS) {
-				Unlock(); SE();
-				if(!cur->pc || !cur->pc->seek) return -1;
-				else return cur->pc->seek(NULL,dpath,cur->pc);
+				if(!cur->path || !cur->path || !cur->path->fs || !cur->path->fs->seek) return -1;
+				else return cur->path->fs->seek(NULL,dest_path,cur->path);
 			}
 			else if(cur->min.type == FS_MAP_DIR){
-				Unlock(); SE();
-				dpath->data = cur->son;
-				dpath->pc = &root_pc;
+				if(dest_path->fs && dest_path->fs->close_path) 
+					dest_path->fs->close_path(dest_path);
+				dest_path->data = cur->son;
+				dest_path->fs = &root_path;
 				return 0;
 			}
-			else {SE(); Unlock(); return -1;}
+			else return -1;
 		}
-		if(cur->next == first){SE(); Unlock(); return -1; }
+		if(cur->next == first) return -1; 
 		cur = cur->next;
 	}
-	Unlock();SE(); return -1;
+	return -1;
 }
-static int root_catalog(wchar_t * path,LPCATALOG buf,struct _FS_PATH_ * cur_path){
-	wchar_t *name,*tpath;
-	struct _DIR_ * cur,*first;
-	size_t name_len;
+static int root_cat(LPCATALOG buf,size_t size,LPSIMPLE_PATH cur_path){
 	
-	cur = cur_path->data;
-	SD(); Lock();
-	while(1){
-		name = path;
-		tpath = wcschr(path,L'\\');
-		if(!tpath) break;
-		name_len = tpath - path;
-		first = cur;
-		path = tpath + 1;
-		while(1){
-			if(cur->min.len == name_len && !wcsncmp(DirName(cur),name,name_len)){
-				if(cur->min.type == FS_MAP_FS) {
-					Unlock(); SE();
-					if(!cur->pc || !cur->pc->catalog1) return -1;
-					else return cur->pc->catalog1(path,buf,cur->pc);
-				}
-				else if(cur->min.type == FS_MAP_DEV){
-					Unlock();
-					SE();
-					return -1;
-				}
-				else break;
-			}
-			if(cur->next == first){ Unlock(); SE(); return -1; }
-			cur = cur->next;
-		}
-		cur = cur->son;
-	}
-	name_len = wcslen(path);
-	first = cur;
-	path = tpath + 1;
-	while(1){
-		if(cur->min.len == name_len && !wcsncmp(DirName(cur),name,name_len)){
-			if(cur->min.type == FS_MAP_FS) {
-				Unlock(); SE();
-				if(!cur->pc || !cur->pc->catalog1) return NULL;
-				else return cur->pc->catalog1(NULL,buf,cur->pc);
-			}
-			else if(cur->min.type == FS_MAP_DIR){
-				Unlock(); SE();
-				return 0;
-			}
-			else { Unlock(); SE();return NULL; }
-		}
-		if(cur->next == first){ Unlock(); SE();return NULL; }
-		cur = cur->next;
-	}
-	Unlock();
-	SE();
-	return NULL;
+	return 0;
 }
+static int root_exist(wchar_t * path,LPSIMPLE_PATH cur_path){
 
+	return 0;
+}
 static size_t prep_path(wchar_t * d,const wchar_t * _s0,const wchar_t * _s1,const wchar_t * _s2){
 	wchar_t * _d;
 	int i;
@@ -293,12 +255,14 @@ static size_t prep_path(wchar_t * d,const wchar_t * _s0,const wchar_t * _s1,cons
 	*d = 0;
 	return d - _d;
 }
-int fs_map(const wchar_t * _path,void * xc){
+int fs_map(const wchar_t * _path,void * xc,struct _SIMPLE_PATH_ * f_path){
 	wchar_t * path_heap;
 	wchar_t * path,*tpath,*name,*tname;
 	size_t path_len,name_len;
 	struct _DIR_ * cur,*first,*ent,*ents,*ents2;
 	int is_fs = 0;
+	struct _DIR_ * invaild = NULL;
+	int hash;
 	
 	path_len = wcslen(_path);
 	path_heap = kmalloc(sizeof(wchar_t) * path_len + sizeof(wchar_t),0);
@@ -313,28 +277,46 @@ int fs_map(const wchar_t * _path,void * xc){
 	}
 	if(path_heap[0] == L'\\') path = path_heap + 1;
 	else path = path_heap;
-	cur = root;
-	SD(); Lock();
+	cur = &root;
 	while(1){
 		name = path;
+		hash = name[0];
+		hash ^= hash >> 8;
+		hash ^= hash >> 4;
+		hash &= 0x0f;
 		tpath = wcschr(path,L'\\');
 		if(!tpath) break;
 		name_len = tpath - path;
 		path = tpath + 1;
 		first = cur;
+retry1:
 		while(1){
-			
-			if(cur->min.len == name_len && 
-				!wcsncmp(DirName(cur),name,name_len)){
-				if(cur->min.type == FS_MAP_DIR) break;
-				if(cur->min.type == FS_MAP_FS){
-					Unlock(); SE();
-					kfree(path_heap);
-					return ERR_UNSUPPOSE_MAP_TYPE;
+			if(cur->min.type != FS_MAP_INVAILD){
+				if (cur->min.type == FS_MAP_FREE && !invaild) {//need cirtal section
+					if(!cmpxchg1b(&cur->min.type,FS_MAP_FREE,FS_MAP_INVAILD,NULL))
+						invaild = cur;
+				}
+				else{
+					if(cur->min.len == name_len && 
+						!wcsncmp(DirName(cur),name,name_len)){
+						if(cur->min.type == FS_MAP_DIR) break;
+						if(cur->min.type == FS_MAP_FS){
+							kfree(path_heap);
+							return ERR_UNSUPPOSE_MAP_TYPE;
+						}
+					}
 				}
 			}
 			if(cur->next == first){
-				ent = kmalloc(sizeof(struct _DIR_),0);
+				while(spin_try_lock_bit(&create_lock,hash)){
+					while(create_lock & (1 << hash)) pause();
+					if(first != cur->next){
+						cur = first;
+						goto retry1;
+					}
+				}
+				if(!invaild) ent = kmalloc(sizeof(struct _DIR_),0);
+				else ent = invaild;
 				ent->min.len = name_len;
 				ent->min.type = FS_MAP_DIR;
 				if(name_len <= FS_MAP_DIR_MIN_LEN) tname = ent->min.name;
@@ -351,37 +333,62 @@ int fs_map(const wchar_t * _path,void * xc){
 				ents2->min.name[0] = L'.';
 				ents2->next = ents;
 				ents2->son = ents;
-				ent->next = cur->next;
-				cur->next = ent;
+				if(invaild) invaild = NULL;
+				else {
+					ent->next = first;
+					xchgq(&cur->next,ent);
+				}
+				spin_unlock_bit(&create_lock,hash);
+				cur = ent;
+				break;
 			}
-			else cur = cur->next;
+			cur = cur->next;
 		}
 		cur = cur->son;
+		if(invaild) {
+			invaild->min.type = FS_MAP_FREE;
+			invaild = NULL;
+		}
 	}
 	name_len = wcslen(name);
 	first = cur;
+retry2:
 	while(1){
-		if(cur->min.len == name_len &&
-			!wcsncmp(DirName(cur),name,name_len)){
-			if(is_fs){
-				if(cur->min.type != FS_MAP_DEV){
-					Unlock(); SE();
-					kfree(path_heap);
-					return ERR_UNSUPPOSE_MAP_TYPE;
-				}
+		if(cur->min.type != FS_MAP_INVAILD){
+			if (cur->min.type == FS_MAP_FREE && !invaild) {//need cirtal section
+				if(!cmpxchg1b(&cur->min.type,FS_MAP_FREE,FS_MAP_INVAILD,NULL))
+					invaild = cur;
 			}
 			else{
-				if(cur->min.type == FS_MAP_DEV){
-					Unlock(); SE();
+				if(cur->min.len == name_len && 
+					!wcsncmp(DirName(cur),name,name_len)){
+					if(is_fs){
+						if(cur->min.type == FS_MAP_FS ||
+							cur->min.type == FS_MAP_DIR){
+							kfree(path_heap);
+							return ERR_UNSUPPOSE_MAP_TYPE;
+						}
+						break;
+					}
+					if(cur->min.type == FS_MAP_DIR || 
+						cur->min.type == FS_MAP_FS) break;
 					kfree(path_heap);
 					return ERR_UNSUPPOSE_MAP_TYPE;
 				}
 			}
 		}
 		if(cur->next == first) break;
-		else cur = cur->next;
+	 	cur = cur->next;
 	}
-	ent = kmalloc(sizeof(struct _DIR_),0);
+	while(spin_try_lock_bit(&create_lock,hash)){
+		while(create_lock & (1 << hash)) pause();
+		if(first != cur->next){
+			cur = first;
+			goto retry2;
+		}
+	}
+	if(invaild) ent = invaild;
+	else ent = kmalloc(sizeof(struct _DIR_),0);
 	ent->min.len = name_len;
 	if(is_fs) ent->min.type = FS_MAP_FS;
 	else ent->min.type = FS_MAP_DEV;
@@ -389,20 +396,21 @@ int fs_map(const wchar_t * _path,void * xc){
 	else tname = ent->max.name = kmalloc(sizeof(wchar_t) * name_len,0);
 	wcsncpy(tname,name,name_len);
 	if(is_fs) ent->fc = xc;
-	else ent->pc = xc;
-	ent->next = first;
-	cur->next = ent;
-	Unlock(); SE();
+	else ent->path = xc;
+	if(!invaild) {
+		ent->next = first;
+		xchgq(&cur->next,ent);
+	}
+	spin_unlock_bit(&create_lock,hash);
 	wprintk(L"FS map:\\%s\n",path_heap[0] == L'\\' ? path_heap + 1 : path_heap);
 	kfree(path_heap);
 	return 0;
 }
-void * fs_unmap(const wchar_t * _path){
+int fs_unmap(const wchar_t * _path){
 	wchar_t * path_heap,*path,*tpath,*name;
-	struct _DIR_ * cur,*prev,*first;
+	struct _DIR_ * cur,*first;
 	size_t name_len;
 	int is_fs = 0;
-	void * xc;
 	
 	name_len = wcslen(path);
 	path_heap = kmalloc(sizeof(wchar_t) * name_len + sizeof(wchar_t),0);
@@ -417,8 +425,7 @@ void * fs_unmap(const wchar_t * _path){
 	}
 	if(path_heap[0] == L'\\') path = path_heap + 1;
 	else path = path_heap;
-	cur = root;
-	SD(); Lock();
+	cur = &root;
 	while(1){
 		name = path;
 		tpath = wcschr(path,L'\\');
@@ -432,7 +439,6 @@ void * fs_unmap(const wchar_t * _path){
 				if(cur->min.type == FS_MAP_DIR) break;		
 			}
 			if(cur->next == first){
-				Unlock(); SE();
 				kfree(path_heap);
 				return -1;
 			}
@@ -452,38 +458,21 @@ void * fs_unmap(const wchar_t * _path){
 				cur->min.type == FS_MAP_DEV) break;
 		}
 		if(cur->next == first){
-			Unlock(); SE();
 			kfree(path_heap);
 			return -1;
 		}
-		prev = cur;
 		cur = cur->next;
 	}
 #ifdef DEBUG
 	if(!prev) print("BUG:fs_unmap().\n");
 #endif
-	prev->next = cur->next;
-	Unlock(); SE();
+	cur->min.type = FS_MAP_FREE;
 	kfree(path_heap);
 	if(cur->min.len > FS_MAP_DIR_MIN_LEN) kfree(cur->max.name);
-	if(is_fs) xc = cur->fc;
-	else xc = cur->pc;
 	kfree(cur);
-	return xc;
+	return 0;
 }
-int close(LPSTREAM file){
-	struct _PROCESS_ * process;
-#ifdef CHECK
-	if(!file || !file->fc || !file->fc->close) return ERR_INVAILD_PTR;
-#endif
-	LockProcessField(process = GetCurProcess());
-	if(file->next) file->next->prev = file->prev;
-	if(file->prev) file->prev->next = file;
-	if(file == process->file) process->file = file->next;
-	UnlockProcessField(process);
-	return file->fc->close(file);
-}
-LPSTREAM open(const wchar_t * _name,u64 mode){
+LPSTREAM open(const wchar_t * _name,int mode,void * call_back_data, void(*call_back)(LPSTREAM, void*)){
 	wchar_t * path_heap;
 	size_t name_len;
 	LPSTREAM stream;
@@ -500,38 +489,35 @@ LPSTREAM open(const wchar_t * _name,u64 mode){
 		kfree(path_heap);
 		return NULL;
 	}
+	process =  GetCurProcess();
 	if(path_heap[0] != L'\\'){
-		if(!GetCurProcess()->cur_path.pc || 
-			!GetCurProcess()->cur_path.pc->open0) {
+		if(!process->cur_path.fs || 
+			!process->cur_path.fs->open) {
 			kfree(path_heap);
 			return NULL;
 		}
-		else stream = GetCurProcess()->cur_path.pc->open0(path_heap,mode,&(GetCurProcess()->cur_path));
+		else {
+			stream = process->cur_path.fs->open(path_heap,mode,&process->cur_path);
+		}
 	}
-	else stream = root_open(path_heap + 1,mode,&root_path);
-	kfree(path_heap);
+	else {
+		stream = root_open(path_heap + 1,mode,&root_path);
+	}
 	if(stream){
-		stream->prev = NULL;
-		LockProcessField(process = GetCurProcess());
-		if(process->file){
-			stream->next = process->file;
-			process->file->prev = stream;
-			process->file = stream;
-		}
-		else{
-			process->file = stream;
-			stream->next = NULL;
-		}
-		UnlockProcessField(process);
+		stream->call_back = call_back;
+		stream->call_back_data = call_back_data;
 	}
+	kfree(path_heap);
 	return stream;
 }
-int seek(const wchar_t * _name,struct _FS_PATH_ * dpath){
+int seek(const wchar_t * _name){
 	wchar_t * path_heap;
 	size_t name_len;
+	LPPROCESS process;
+	SIMPLE_PATH my_path;
 	int ret;
 
-	if(!dpath) dpath = &(GetCurProcess()->cur_path);
+	process = GetCurProcess();
 	name_len = wcslen(_name);
 	path_heap = kmalloc(sizeof(wchar_t) * name_len + sizeof(wchar_t),0);
 	name_len = prep_path(path_heap,_name,NULL,NULL);
@@ -540,58 +526,22 @@ int seek(const wchar_t * _name,struct _FS_PATH_ * dpath){
 		return 0;
 	}
 	if(name_len == 1 && *path_heap == L'\\'){
-		dpath->pc = &root_pc;
-		dpath->data = root;
+		if(process->cur_path.fs && process->cur_path.fs->close_path)
+			process->cur_path.fs->close_path(&process->cur_path);
+		process->cur_path.fs = &root_ctrl;
+		process->cur_path.data = &root;
 		kfree(path_heap);
 		return 0;
 	}
 	if(path_heap[name_len - 1] == L'\\') path_heap[name_len - 1] = 0;
-	if(path_heap[0] == L'\\') ret = root_seek(path_heap + 1,dpath,&root_path);
+	if(path_heap[0] == L'\\') ret = root_seek(path_heap + 1,&process->cur_path,&root_path);
 	else {
-		if(!GetCurProcess()->cur_path.pc || 
-			!GetCurProcess()->cur_path.pc->seek)ret = root_seek(path_heap,dpath,&root_path);
-		else GetCurProcess()->cur_path.pc->seek(path_heap,dpath,&(GetCurProcess()->cur_path));
+		if(!process->cur_path.fs || 
+			!process->cur_path.fs->seek)
+			ret = root_seek(path_heap,&process->cur_path,&root_path);
+		else ret = process->cur_path.fs->seek(path_heap,&process->cur_path,&process->cur_path);
 	}
 	kfree(path_heap);
 	return ret;
-}
-int catalog(const wchar_t * _name,LPCATALOG buf){
-	wchar_t * path_heap;
-	size_t name_len;
-	int ret;
-	
-	name_len = wcslen(_name);
-	path_heap = kmalloc(sizeof(wchar_t) * name_len + sizeof(wchar_t),0);
-	name_len = prep_path(path_heap,_name,NULL,NULL);
-	if(!name_len) {
-		kfree(path_heap);
-		return NULL;
-	}
-	if(path_heap[name_len - 1] == L'\\') {
-		kfree(path_heap);
-		return NULL;
-	}
-	if(path_heap[0] != L'\\'){
-		if(!GetCurProcess()->cur_path.pc || 
-			!GetCurProcess()->cur_path.pc->catalog0) {
-			kfree(path_heap);
-			return NULL;
-		}
-		else ret = GetCurProcess()->cur_path.pc->catalog0(path_heap,buf,&(GetCurProcess()->cur_path));
-	}
-	else ret = root_catalog(path_heap + 1,buf,&root_path);
-	kfree(path_heap);
-	return ret;
-}
-void fs_init(){
-	root = kmalloc(sizeof(struct _DIR_),8);
-	root->min.len = 1;
-	root->min.type = FS_MAP_DIR;
-	root->min.name[0] = L'.';
-	root->next = root;
-	root->son = root;
-	root_path.data = root;
-	root_path.pc = &root_pc;
-	lock = 0;
 }
 

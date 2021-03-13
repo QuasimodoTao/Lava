@@ -68,11 +68,11 @@
 #define IOAPIC_RED_ENT_SHIFT	16
 #define LAPIC_ID_MASK	0xff000000
 #define LAPIC_ID_SHIFT	24
-#define LAPICI(reg)		(*(volatile u32*)(local_apic_mmio +(reg)))
-#define LAPICO(reg,val)	(*(volatile u32*)(local_apic_mmio +(reg))=(u32)(val))
+#define LAPICI(reg)		(*(volatile u32*)(((u64)ADDRP2V(init_msg.LAPIC)) +(reg)))
+#define LAPICO(reg,val)	(*(volatile u32*)(((u64)ADDRP2V(init_msg.LAPIC)) +(reg))=(u32)(val))
 #define IRQ_LIST_BUSY	MAX_IOAPIC
 #define IOAPIC_BUSY		0
-#define EOI()	apic_eoi()
+#define EOI()			LAPICO(LAPIC_EOI,0)	
 
 struct _IRQ_HANDLE_ {
 	int (*handle)(int);
@@ -82,98 +82,41 @@ struct _IRQ_HANDLE_ {
 void ap_entry_point(u16 * ap_lock);
 void internel_wait(int usecond);
 
-void __irq00(void);
-void __irq01(void);
-void __irq02(void);
-void __irq03(void);
-void __irq04(void);
-void __irq05(void);
-void __irq06(void);
-void __irq07(void);
-void __irq08(void);
-void __irq09(void);
-void __irq0a(void);
-void __irq0b(void);
-void __irq0c(void);
-void __irq0d(void);
-void __irq0e(void);
-void __irq0f(void);
-void __irq10(void);
-void __irq11(void);
-void __irq12(void);
-void __irq13(void);
-void __irq14(void);
-void __irq15(void);
-void __irq16(void);
-void __irq17(void);
-void __irq18(void);
-void __irq19(void);
-void __irq1a(void);
-void __irq1b(void);
-void __irq1c(void);
-void __irq1d(void);
-void __irq1e(void);
-void __irq1f(void);
-void __irq20(void);
-void __irq21(void);
-void __irq22(void);
-void __irq23(void);
-void __irq24(void);
-void __irq25(void);
-void __irq26(void);
-void __irq27(void);
-void __irq28(void);
-void __irq29(void);
-void __irq2a(void);
-void __irq2b(void);
-void __irq2c(void);
-void __irq2d(void);
-void __irq2e(void);
-void __irq2f(void);
-void __ipi00(void);
-void __ipi01(void);
-void __ipi02(void);
-void __ipi03(void);
-void __ipi04(void);
-void __ipi05(void);
-void __ipi06(void);
-void __ipi07(void);
-void __ipi08(void);
-void __ipi09(void);
-void __ipi0a(void);
-void __ipi0b(void);
-void __ipi0c(void);
-void __ipi0d(void);
-void __ipi0e(void);
-void __ipi0f(void);
+void __irq00(void);void __irq01(void);void __irq02(void);void __irq03(void);
+void __irq04(void);void __irq05(void);void __irq06(void);void __irq07(void);
+void __irq08(void);void __irq09(void);void __irq0a(void);void __irq0b(void);
+void __irq0c(void);void __irq0d(void);void __irq0e(void);void __irq0f(void);
+void __irq10(void);void __irq11(void);void __irq12(void);void __irq13(void);
+void __irq14(void);void __irq15(void);void __irq16(void);void __irq17(void);
+void __irq18(void);void __irq19(void);void __irq1a(void);void __irq1b(void);
+void __irq1c(void);void __irq1d(void);void __irq1e(void);void __irq1f(void);
+void __irq20(void);void __irq21(void);void __irq22(void);void __irq23(void);
+void __irq24(void);void __irq25(void);void __irq26(void);void __irq27(void);
+void __irq28(void);void __irq29(void);void __irq2a(void);void __irq2b(void);
+void __irq2c(void);void __irq2d(void);void __irq2e(void);void __irq2f(void);
+void __ipi00(void);void __ipi01(void);void __ipi02(void);void __ipi03(void);
+void __ipi04(void);void __ipi05(void);void __ipi06(void);void __ipi07(void);
+void __ipi08(void);void __ipi09(void);void __ipi0a(void);void __ipi0b(void);
+void __ipi0c(void);void __ipi0d(void);void __ipi0e(void);void __ipi0f(void);
 extern u8 AP_init[];
 extern int AP_init_size;
 extern int AP_enter;
 
+struct _IOAPIC_ {u8 id,lint_count;};
+struct _IRQ2LINT_ {u8 index,lint;};
 
-struct _IOAPIC_ {
-	u8 id;
-	u8 lint_count;
-};
-struct _IRQ2LINT_ {
-	u8 index;
-	u8 lint;
-};
-
-
-static u64 local_apic_mmio;
 static u64 io_apic_mmio[MAX_IOAPIC];
-
 static struct _IOAPIC_ ioapic[MAX_IOAPIC];
 static struct _IRQ2LINT_ irq2lint[IRQ_COUNT];
 static struct _IRQ_HANDLE_ * irq_handle[IRQ_COUNT];
 static u8 cpu_id2lapic_id[MAX_CPU_COUNT];
 static int lock;
-static int apic_timer_time;
-static u8 irq_mask_busy[(IRQ_COUNT + 0x07) >> 3];
-spin_optr_def_bit(IRQList,&lock,IRQ_LIST_BUSY);
 spin_optr_def_arg_bit(IOAPIC,&lock,IOAPIC_BUSY);
 static int (*ipi_handle[IPI_COUNT])() = {NULL,};
+
+void apic_enable(){
+	LAPICO(LAPIC_SIVR,LAPICI(LAPIC_SIVR) | 0x0100);
+}
 
 static inline void IOAPICO(int index,int reg,u32 val){
 	*(volatile u32*)(io_apic_mmio[index]) = reg;
@@ -183,40 +126,35 @@ static inline u32 IOAPICI(int index,int reg){
 	*(volatile u32*)(io_apic_mmio[index]) = reg;
 	return *(volatile u32*)(io_apic_mmio[index] + 0x10);
 }
-
 int request_irq(int irq,int(*handle)(int)){
 	struct _IRQ_HANDLE_ * cur;
+	struct _IRQ_HANDLE_ * unvaild = NULL;
 	u64 rf;
 	
 	if(irq >= IRQ_COUNT) return ERR_OUT_OF_RANGE;
+	cur = irq_handle[irq];
+	while(cur){
+		if(!cur->handle && 
+			!cmpxchg8b(&cur->handle,NULL,handle,NULL)){
+			unvaild = cur;
+			return 0;
+		}
+		cur = cur->next;
+	}
 	cur = kmalloc(sizeof(struct _IRQ_HANDLE_),0);
 	cur->handle = handle;
-	SFI(rf);
-	LockIRQList();
-	cur->next = irq_handle[irq];
-	irq_handle[irq] = cur;
-	UnlockIRQList();
-	LF(rf);
+	do{
+		cur->next = irq_handle[irq];
+	} while(cmpxchg8b(&irq_handle[irq],cur->next,cur,NULL));
 	return 0;
 }
 int reject_irq(int irq,int(*handle)(int)){
-	struct _IRQ_HANDLE_ * _handle, * prev = NULL;
-	u64 rf;
-
+	struct _IRQ_HANDLE_ * _handle;
 	if(irq >= IRQ_COUNT) return ERR_OUT_OF_RANGE;
-	SFI(rf);
-	LockIRQList();
-	for(_handle = irq_handle[irq];_handle;prev = _handle,_handle = _handle->next)
+	for(_handle = irq_handle[irq];_handle;_handle = _handle->next)
 		if(_handle->handle == handle){
-			if(prev) xchgq((void*)&(prev->next),(u64)(_handle->next));
-			else irq_handle[irq] = _handle->next;
-			UnlockIRQList();
-			LF(rf);
-			kfree(_handle);
-			return 0;
+			return cmpxchg8b(&_handle->handle,handle,NULL,NULL);
 		}
-	UnlockIRQList();
-	LF(rf);
 	return ERR_OUT_OF_RANGE;
 }
 int irq_routine(int irq,int lapic_id){
@@ -253,23 +191,6 @@ static int assign_int(u32 lint,u32 ioapic_id,u32 irq){
 	UnlockIOAPIC(index);
 	return 0;
 }
-int apic_enable(){
-	u32 tmp;
-
-	tmp = LAPICI(LAPIC_SIVR);
-	tmp |= 0x100;
-	LAPICO(LAPIC_SIVR,tmp);
-}
-//static int apic_disable(){
-//	u32 tmp;
-//	
-//	tmp = LAPICI(LAPIC_SIVR);
-//	tmp &= ~0x100;
-//	LAPICO(LAPIC_SIVR,tmp);
-//}
-static void apic_eoi(){
-	LAPICO(LAPIC_EOI,0);
-}
 int irq_enable(u32 irq){
 	u32 tmp;
 	u64 rf;
@@ -277,13 +198,11 @@ int irq_enable(u32 irq){
 	if(irq >= IRQ_COUNT) return ERR_OUT_OF_RANGE;
 	if(irq2lint[irq].index == 0xff) return ERR_OUT_OF_RANGE;
 	SFI(rf);
-	spin_lock_bit(irq_mask_busy,irq);
 	LockIOAPIC(irq2lint[irq].index);
 	tmp = IOAPICI(irq2lint[irq].index,IOAPIC_TABL(irq2lint[irq].lint));
 	tmp &= 0xfffeffff;
 	IOAPICO(irq2lint[irq].index,IOAPIC_TABL(irq2lint[irq].lint),tmp);
 	UnlockIOAPIC(irq2lint[irq].index);
-	spin_unlock_bit(irq_mask_busy,irq);
 	LF(rf);
 	return 0;
 }
@@ -294,13 +213,11 @@ int irq_disable(u32 irq){
 	if(irq >= IRQ_COUNT) return ERR_OUT_OF_RANGE;
 	if(irq2lint[irq].index == 0xff) return ERR_OUT_OF_RANGE;
 	SFI(rf);
-	spin_lock_bit(irq_mask_busy,irq);
 	LockIOAPIC(irq2lint[irq].index);
 	tmp = IOAPICI(irq2lint[irq].index,IOAPIC_TABL(irq2lint[irq].lint));
 	tmp |= 0x00010000;
 	IOAPICO(irq2lint[irq].index,IOAPIC_TABL(irq2lint[irq].lint),tmp);
 	UnlockIOAPIC(irq2lint[irq].index);
-	spin_unlock_bit(irq_mask_busy,irq);
 	LF(rf);
 	return 0;
 }
@@ -317,30 +234,33 @@ void send_ipi(u8 ipi,u8 dest_cpu,int priority,int mode){
 	LF(rf);
 }
 void ipi_arise(int ipi){
+	u64 rf;
+
+	SFI(rf);
+	schedule_disable();
 	EOI();
-	SD();
 	if(ipi > IPI_COUNT) return;
 	if(ipi_handle[ipi]) ipi_handle[ipi]();
-	SE();
+	schedule_enable();
+	LF(rf);
 	if(GetCurThread()->need_destory) exit(ERR_BE_DESTORY);
 }
 void request_ipi(u8 ipi,int(*handle)()){
 	if(ipi > IPI_COUNT) return;
 	ipi_handle[ipi] = handle;
 }
+void inter_eoi(){
+	EOI();
+}
 void irq_arise(int irq){
 	struct _IRQ_HANDLE_ * cur;
-	
-	EOI();
-	SD();
+	schedule_disable();
 	for(cur = irq_handle[irq];cur;cur = cur->next){
-		if(!cur->handle){
-			print("BUG:arch/init.c::int_vector_ent().\n");
-			stop();
-		}
+		if(!cur->handle) continue;
 		cur->handle(irq);
 	}
-	SE();
+	EOI();
+	schedule_enable();
 }
 void lapic_init(){
 	u8 lapic_id;
@@ -445,11 +365,9 @@ void mp_init(){
 	
 	memset(irq_handle,0,sizeof(irq_handle));
 	memset(cpu_id2lapic_id,0xff,sizeof(cpu_id2lapic_id));
-	memset(irq_mask_busy,0,sizeof(irq_mask_busy));
 	lock = 0;
 	ioapic_init();
-	local_apic_mmio = ADDRP2V(init_msg.LAPIC);
-	page_uncacheable(NULL,(void*)local_apic_mmio ,PAGE_SIZE);
+	page_uncacheable(NULL,(void*)(ADDRP2V(init_msg.LAPIC)) ,PAGE_SIZE);
 	if(init_msg.Feature & 0xff){
 		//1:ISA,2:EISA,3:EISA,4:MCA,5:ISA+PCI,6:EISA+PCI,7:MCA+PCI
 		ioapic_id = (IOAPICI(0,IOAPIC_ID) & IOAPIC_ID_MASK) >> IOAPIC_ID_SHIFT;

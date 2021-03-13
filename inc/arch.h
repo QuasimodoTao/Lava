@@ -394,7 +394,6 @@ struct _PRIVATE_DATA_ {
 	u32 cpu_id;
 	u32 cpu_lock;
 	u32 flags;
-	u32 schedule_disable_count;
 	int need_schedule;
 	struct _PROCESS_ * cur_process;
 	struct _THREAD_ * cur_thread;

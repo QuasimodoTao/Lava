@@ -364,8 +364,8 @@ enum ISA {
         EISA_HD_FEATURE_PORT =  0x01,
         EISA_HD_SEC_CNT_PORT =  0x02,
         EISA_HD_LBA0_PORT =     0x03,
-        EISA_HD_LBA1 =          0x04,
-        EISA_HD_LBA2 =          0x05,
+        EISA_HD_LBA1_PORT =     0x04,
+        EISA_HD_LBA2_PORT =     0x05,
         EISA_HD_HDDEVSEL =      0x06,
         EISA_HD_COMMAND =       0x07,
         EISA_HD_STATUS =        0x07   

@@ -27,6 +27,7 @@
 #include <gst.h>
 #include <mm.h>
 #include <eisa.h>
+#include <fctrl.h>
 
 #define KEY_CAPS_LOCK_DOWN		1
 #define KEY_NUM_LOCK_DOWN		2
@@ -252,27 +253,10 @@ static struct _FCPEB_ ps2_kbd_fc = {
 	.out = NULL,
 	.open = ps2_kbd_open,
 	.close = ps2_kbd_close,
-	.read = NULL,
-	.write = NULL,
-	.seek_get = NULL,
-	.seek_put = NULL,
-	.tell_get = NULL,
-	.tell_put = NULL,
 	.get = ps2_kbd_get,
-	.put = NULL,
-	.read_block = NULL,
-	.write_block = NULL,
 	.fresh_get = ps2_kbd_fresh,
-	.fresh_put = ps2_kbd_fresh,
-	.get_size = NULL,
-	.set_size = NULL,
-	.get_count = NULL,
-	.set_count = NULL,
-	.data = NULL,
+	.fresh_put = ps2_kbd_fresh
 };
-
-
-
 
 void ps2_kbd_init(){
 	u64 rf;
@@ -296,7 +280,7 @@ void ps2_kbd_init(){
 	LF(rf);
 	head = tail = 0;
 	create_semaphore_ex(FIFO_SIZE,0,&semaphore);
-	fs_map(path,&ps2_kbd_fc);
+	fs_map(path,&ps2_kbd_fc,NULL);
 	irq_enable(EISA_KEYBOARD_IRQ);
 }
 

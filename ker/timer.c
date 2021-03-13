@@ -90,7 +90,7 @@ void counter_updata(){//中断代码，要求处理器禁止调度
 		}
 	}
 	UnlockTimerList(cur);
-	schedule();
+	schedule_update();
 }
 int reg_counter(struct _COUNTER_ * counter){
 	LPTIMER cur;
@@ -154,7 +154,6 @@ LPTIMER timer_alloc(u32 time,int mode,void (*proc)(LPTIMER,void*),void * data){
 	timer->data = data;
 	timer->busy = TIMER_LIST_BUSY;
 	timer->gst = GST_TIMER;
-	SD();//禁止调度
 	if(counter_mask) counter_mask();
 	LockTimerList(timer_list);
 	if(timer_list->next == timer_list){
@@ -172,7 +171,6 @@ LPTIMER timer_alloc(u32 time,int mode,void (*proc)(LPTIMER,void*),void * data){
 	UnlockTimerList(timer->next);
 	UnlockTimerList(timer);
 	if(counter_unmask) counter_unmask();
-	SE();
 	return timer;
 }
 int timer_free(LPTIMER timer){
@@ -180,7 +178,6 @@ int timer_free(LPTIMER timer){
 	if(!timer) return ERR_INVAILD_PTR;
 	if(timer->gst != GST_TIMER) return ERR_BAD_TYPE;
 #endif
-	SD();
 	if(counter_mask) counter_mask();
 	LockTimerField(timer);
 	timer->gst = GST_UNDEF;
@@ -192,7 +189,6 @@ int timer_free(LPTIMER timer){
 	timer->next->prev = timer->prev;
 	UnlockTimerList(timer->next);
 	if(counter_unmask) counter_unmask();
-	SE();
 	timer->gst = GST_UNDEF;
 	kfree(timer);
 	return 0;

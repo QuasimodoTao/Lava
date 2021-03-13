@@ -84,9 +84,12 @@ static unsigned int poly8_lookup[256] = {
 	0xB40BBE37, 0xC30C8EA1, 0x5A05DF1B, 0x2D02EF8D
 };
 
-unsigned int ComputeCRC32(void * Data, int Len) {
-	unsigned int crc = 0xffffffff;
+unsigned int ComputeCRC32(unsigned int crc,void * Data, int Len) {
 	unsigned char * p = (unsigned char *)Data;
-	while (Len-- != 0) crc = poly8_lookup[((unsigned char)crc ^ *(p++))] ^ (crc >> 8);
-	return (crc ^ 0xffffffff);
+	crc = ~crc;
+	while (Len) {
+		Len--;
+		crc = poly8_lookup[((unsigned char)crc ^ *(p++))] ^ (crc >> 8);
+	}
+	return ~crc;
 }

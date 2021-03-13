@@ -66,11 +66,11 @@ static int ahci_int_handle(struct _PCIDEV_ * dev,struct _AHCI_ * ahci,u16 pci_st
 	u32 is;
 	int i;
 	
-	if(pci_status & PCI_STATUS_IS){
-		is = ahci->hba->is;
-		for(i = 0;i < ahci->port_count;i++)
-			if(is & (1 << i) && ahci->ctrl[i]) ata_on_ahci_int_handle(ahci,ahci->ctrl[i]);
-	}
+	is = ahci->hba->is;
+	ahci->hba->is = 0xffffffff;
+	for(i = 0;i < ahci->port_count;i++,is >>= 1)
+		if((is & 1) && ahci->ctrl[i]) 
+			ata_on_ahci_int_handle(ahci,ahci->ctrl[i]);
 	if(pci_status & PCI_STATUS_DPD){
 		
 		
@@ -97,12 +97,30 @@ static int ahci_int_handle(struct _PCIDEV_ * dev,struct _AHCI_ * ahci,u16 pci_st
 	return 0;
 }
 
+struct _INI_ARGV_ {
+	volatile struct _AHCI_ * ahci;
+	int i;
+};
+
+static int ata_on_ahci_enum(void * argv){
+	struct _INI_ARGV_ * arg;
+	struct _AHCI_ * ahci;
+	int port;
+
+	arg = argv;
+	ahci = arg->ahci;
+	port = arg->i;
+	arg->ahci = NULL;
+	ahci->ctrl[port] = ata_on_ahci_open(ahci,port);
+	return 0;
+}
 
 struct _AHCI_ * ahci_open(LPPCIDEV dev){
 	int port_count;
 	volatile struct _HBA_ * hba;
 	struct _AHCI_ * ahci;
 	int i;
+	struct _INI_ARGV_ arg;
 
 	spin_lock_bit(&busy,0);
 	for(ahci = ahci_list;ahci && ahci->dev != dev;ahci = ahci->next);
@@ -112,6 +130,8 @@ struct _AHCI_ * ahci_open(LPPCIDEV dev){
 		page_uncacheable(NULL,hba,0x1100);
 		port_count = (hba->cap & HBA_CAP_NP) + 1;
 		ahci = kmalloc(sizeof(struct _AHCI_) + sizeof(void*) * port_count,0);
+		memset(ahci,0,sizeof(struct _AHCI_));
+		ahci->port_count = port_count;
 		spin_lock_bit(&busy,0);
 		ahci->next = ahci_list;
 		ahci_list = ahci;
@@ -120,17 +140,22 @@ struct _AHCI_ * ahci_open(LPPCIDEV dev){
 	ahci->dev = dev;
 	ahci->hba = hba;
 	pci_write_word(dev,PCIStatus,
-		pci_read_word(dev,PCIStatus) | PCI_CMD_ID | PCI_CMD_SEE | PCI_CMD_MBE | PCI_CMD_MSE);
-	hba->ghc |= HBA_GHC_AE;
+		pci_read_word(dev,PCIStatus) | PCI_CMD_SEE | PCI_CMD_MBE | PCI_CMD_MSE);
+	hba->ghc |= HBA_GHC_AE | HBA_GHC_IE;
 	ahci->hba_busy = 0;
 	dev->int_handle = ahci_int_handle;
 	dev->restart = ahci_restart;
 	dev->close = ahci_close;
 	dev->power_off = ahci_power_off;
 	dev->power_on = ahci_power_on;
+	dev->ctrl = ahci;
 	for(i = 0;i < port_count;i++) {
-		if(hba->pi & (1 << i))//if port is avaiable for software
-			ahci->ctrl[i] = ata_on_ahci_open(ahci,i);
+		if(hba->pi & (1 << i)){//if port is avaiable for software
+			arg.ahci = ahci;
+			arg.i = i;
+			create_thread(NULL,ata_on_ahci_enum,&arg);
+			while(arg.ahci) wait(0);
+		}
 	}
 	return ahci;
 }

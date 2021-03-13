@@ -536,6 +536,22 @@ outs_data(outsd,outsl);
 
 #define SFI(f)		asm("pushfq\n\tpopq %0\n\tcli\n\t":"=m"(f)::)
 #define LF(f)		asm("pushq %0\n\tpopfq\n\t"::"m"(f):)
+#define SF(f)		asm("pushfq\n\tpopq %0\n\t":"=m"(f)::)
+
+static inline unsigned long long BSF(void * bit_str){
+	unsigned long long res;
+	asm volatile("bsf %1,%0":"=r"(res):"m"(*(char*)bit_str));
+	return res;
+}
+static inline unsigned long long BSR(void * bit_str,unsigned long long rval){
+	asm volatile("bsf %1,%0":"=r"(rval):"m"(*(char*)bit_str),"0"(rval));
+	return rval;
+}
+static inline int IE(){
+	char res;
+	asm volatile("pushfq\n\tbt $9,(%%rsp)\n\tsetc %0\n\taddq $8,%%rsp":"=r"(res)::);
+	return res;
+}
 
 int cmpxchg16b(__m128 ptr,__m128 cval,__m128 dval,__m128 rval);
 int cmpxchg1b(__m8 ptr,__i8 cval,__i8 dval,__m8 rval);

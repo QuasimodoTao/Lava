@@ -37,73 +37,34 @@
 
 void switch_cs(u16);
 
-void __int00(void);
-void __int01(void);
-void __int02(void);
-void __int03(void);
-void __int04(void);
-void __int05(void);
-void __int06(void);
-void __int07(void);
-void __int08(void);
-void __int09(void);
-void __int0a(void);
-void __int0b(void);
-void __int0c(void);
-void __int0d(void);
-void __int0e(void);
-void __int0f(void);
-void __int10(void);
-void __int11(void);
-void __int12(void);
-void __int13(void);
-void __int14(void);
-void __int15(void);
-void __int16(void);
-void __int17(void);
-void __int18(void);
-void __int19(void);
-void __int1a(void);
-void __int1b(void);
-void __int1c(void);
-void __int1d(void);
-void __int1e(void);
-void __int1f(void);
+void __int00(void);void __int01(void);void __int02(void);void __int03(void);
+void __int04(void);void __int05(void);void __int06(void);void __int07(void);
+void __int08(void);void __int09(void);void __int0a(void);void __int0b(void);
+void __int0c(void);void __int0d(void);void __int0e(void);void __int0f(void);
+void __int10(void);void __int11(void);void __int12(void);void __int13(void);
+void __int14(void);void __int15(void);void __int16(void);void __int17(void);
+void __int18(void);void __int19(void);void __int1a(void);void __int1b(void);
+void __int1c(void);void __int1d(void);void __int1e(void);void __int1f(void);
 
-static struct {
-	u16 limit;
-	u16 base0;
-	u16 base1;
-	u16 base2;
-	u16 base3;
-} gdtr,idtr;
-
-static u32 gdt_first_free;
-u64 int_ent_last_address;
+struct {u16 limit,base0,base1,base2,base3;} gdtr,idtr;
 
 void make_error(){
 	idtr.limit = 0;
 	lidt(&idtr);
 	asm("ud2");
 }
-
 u16 put_TSS(struct _TSS_64_ * tss){
-	u64 dtl,dth;
-	static int lock = 0;
-	u64 base;
+	u64 dtl;
 	u16 selector;
-	
-	base = (u64)tss;
+	static u32 gdt_first_free = (FIRST_SELECTOR >> 3) + 6;
+
 	dtl = 0x0000890000000000 | sizeof(struct _TSS_64_);
-	dtl |= (base << 16) & 0x000000ffffff0000;
-	dtl |= (base << 32) & 0xff00000000000000;
-	dth = base >> 32;
-	spin_lock_bit(&lock,0);
+	dtl |= (((u64)tss) << 16) & 0x000000ffffff0000;
+	dtl |= (((u64)tss) << 32) & 0xff00000000000000;
+	selector = xaddd(&gdt_first_free,2);
 	selector = gdt_first_free;
 	gdt[gdt_first_free] = dtl;
-	gdt[gdt_first_free + 1] = dth;
-	gdt_first_free += 2;
-	spin_unlock_bit(&lock,0);
+	gdt[gdt_first_free + 1] = ((u64)tss) >> 32;
 	selector <<= 3;
 	return selector;
 }
@@ -120,7 +81,6 @@ void make_gate(int vector,u64 addr,int ist,int dpl,int type){
 	idtel |= ((u64)dpl) << (32 + 13);
 	idt[vector * 2] = idtel;
 	idt[vector * 2 + 1] = (addr >> 32) & 0x00000000ffffffff;
-
 }
 int sdt_init_bp(){
 	int i;
@@ -138,7 +98,6 @@ int sdt_init_bp(){
 	gdt[(FIRST_SELECTOR >> 3) + 3] = 0x00cff2000000ffff;//Data L3 32-bits
 	gdt[(FIRST_SELECTOR >> 3) + 4] = 0x0020fa0000000000;//Code L3 64-bits
 	gdt[(FIRST_SELECTOR >> 3) + 5] = 0x0020f20000000000;//Data L3 64-bits;
-	gdt_first_free = (FIRST_SELECTOR >> 3) + 6;
 	lgdt(&gdtr);
 	sss(KERNEL_SS);
 	switch_cs(KERNEL_CS);

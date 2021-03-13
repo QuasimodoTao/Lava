@@ -34,14 +34,14 @@ vga.o : vga.c $(INC)vm.h $(INC)stddef.h $(INC)mm.h $(INC)string.h $(INC)stdio.h
 	$(CC)
 
 serial.o : serial.c $(INC)int.h $(INC)lava.h $(INC)stddef.h $(INC)asm.h $(INC)kernel.h $(INC)mm.h\
- $(INC)gst.h $(INC)semaphore.h $(INC)error.h $(INC)spinlock.h $(INC)stdio.h
+ $(INC)gst.h $(INC)semaphore.h $(INC)error.h $(INC)spinlock.h $(INC)stdio.h $(INC)fs.h
 	$(CC)
 	
 ahci.o : ahci.c $(INC)lava.h $(INC)mm.h $(INC)ahci.h $(INC)stddef.h $(INC)pci.h $(INC)spinlock.h
 	$(CC)
 	
 ata.o : ata.c $(INC)ahci.h $(INC)ata.h $(INC)stddef.h $(INC)spinlock.h $(INC)lava.h $(INC)mm.h $(INC)gst.h\
- $(INC)stdio.h
+ $(INC)stdio.h $(INC)buffer.h
 	$(CC)
 
 clean :

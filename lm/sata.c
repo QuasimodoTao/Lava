@@ -230,7 +230,7 @@ int64_t SATAInit(int64_t MemoryStart,GUID * ActiveDisk,int * _ata_count){
 		if(header->Revision != 0x00010000) continue;
 		crc32 = header->HeaderCRC32;
 		header->HeaderCRC32 = 0;
-		if(crc32 != ComputeCRC32(header,header->HeaderSize)){
+		if(crc32 != ComputeCRC32(0,header,header->HeaderSize)){
 			cmd.lba = gpt_last;
 			cmd.cmd = 0x25;
 			cmd.cnt = 1;
@@ -240,7 +240,7 @@ int64_t SATAInit(int64_t MemoryStart,GUID * ActiveDisk,int * _ata_count){
 			if(header->Revision != 0x00010000) continue;
 			crc32 = header->HeaderCRC32;
 			header->HeaderCRC32 = 0;
-			if(crc32 != ComputeCRC32(header,header->HeaderSize)) continue;
+			if(crc32 != ComputeCRC32(0,header,header->HeaderSize)) continue;
 		}
 		if(!memcmp(&header->DiskGUID,ActiveDisk,sizeof(GUID))) {
 			return MemoryStart;

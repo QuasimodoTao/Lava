@@ -266,7 +266,7 @@ void __attribute__((noreturn)) EntryPoint(const struct _RELY_MSG_ * Msg){
 			print("Can not found kernel image.\n");
 			stop();	
 		}
-		_Msg->KernelImagePBase = 0x100000;
+		_Msg->KernelImagePBase = 0x200000;
 		Read(File,&Head,sizeof(struct _MZ_HEAD_));
 		if(Head.Magic != 0x5a4d){
 			print("Unsuppose kernel image.\n");
@@ -274,7 +274,7 @@ void __attribute__((noreturn)) EntryPoint(const struct _RELY_MSG_ * Msg){
 		}
 		Seek(Head.PEHead,SEEK_SET,File);
 		Read(File,&pep,sizeof(struct _PEP_HEAD_));
-		if(pep.MagicPE != 0x00004550){
+		if(pep.MagicPE != 0x4550){
 			print("Unsuppose kernel image.\n");
 			stop();
 		}
@@ -285,11 +285,11 @@ void __attribute__((noreturn)) EntryPoint(const struct _RELY_MSG_ * Msg){
 		Size += pep.FileAlignment - 1;
 		Size &= ~(pep.FileAlignment - 1);
 		Seek(0,SEEK_SET,File);
-		Read(File,(void*)0x100000,Size);
+		Read(File,(void*)0x200000,Size);
 		Size = 0;
 		for(i = 0;i < pep.NumberOfSections;i++){
 			Seek(Section[i].PointerToRAWData,SEEK_SET,File);
-			Read(File,(void*)(0x100000 + Section[i].VirtualAddress),Section[i].SizeOfRawData);
+			Read(File,(void*)(0x200000 + Section[i].VirtualAddress),Section[i].SizeOfRawData);
 			if(Size < Section[i].SizeOfRawData + Section[i].VirtualAddress)
 				Size = Section[i].SizeOfRawData + Section[i].VirtualAddress;
 		}
@@ -298,8 +298,8 @@ void __attribute__((noreturn)) EntryPoint(const struct _RELY_MSG_ * Msg){
 		_Msg->KernelImageSize = Size;
 		Close(File);
 		vaddr = pep.ImageBase;
-		paddr = 0x100000;
-		MemoryStart = 0x100000 + Size;
+		paddr = 0x200000;
+		MemoryStart = 0x200000 + Size;
 		_Msg->FontBase = MemoryStart;
 	}
 	{//Load Font
@@ -349,7 +349,7 @@ void __attribute__((noreturn)) EntryPoint(const struct _RELY_MSG_ * Msg){
 	_Msg->MemoryStart &= 0xfffffffffffff000;
 	KerEnt = pep.ImageBase + pep.AddressOfEntryPoint;
 	printk("%P.\n",KerEnt);
-	asm("movq %%cr3,%%rbx\n\tmovq %%rbx,%%cr3\n\tmovq $0xffff80000000fff8,%%rsp\n\tcall %%rax"::"a"(KerEnt),"c"(_Msg));;
+	asm("movq %%cr3,%%rbx\n\tmovq %%rbx,%%cr3\n\tmovq $0xffff80000000fff8,%%rsp\n\tcli\n\tcall %%rax"::"a"(KerEnt),"c"(_Msg));;
 	Stop();
 }
 void ShowHexs(void * _p,int Line){

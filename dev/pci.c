@@ -193,7 +193,6 @@ static u16 pci_read_word_m1(u8 bus,u8 dev,u8 fun,u8 reg){
 	addr |= ((u32)bus) << 16;
 	SFI(rf); LockPort();
 	outd(PCI_C1_ADDR,addr);
-	outd(PCI_C1_ADDR,addr);
 	data = ind(PCI_C1_DATA);
 	UnlockPort(); LF(rf);
 	return (data >> (_o << 3)) & 0x0ffff;
@@ -419,17 +418,14 @@ LPPCIDEV pci_find_class(LPPCIDEV dev,u32 class,u32 sub_class,u32 program_if){
 static int pci_irq_handle(int irq){
 	int i;
 	LPPCIDEV dev;
-	u16 status;
 	
 	for(i = 0;i < 4;i++){
-		if(int_line[i] == irq){
-			for(dev = int_list[i];dev;dev = dev->int_next){
-				status = pci_read_word(dev,PCIStatus);
-				if(dev->int_handle) dev->int_handle(dev,dev->ctrl,status);
-			}
-		}
+		if(int_line[i] == irq)
+			for(dev = int_list[i];dev;dev = dev->int_next)
+				if(dev->int_handle) dev->int_handle(dev,dev->ctrl,pci_read_word(dev,PCIStatus));
+		
 	}
-	return -1;
+	return 0;
 }
 static int pci_dev_init_thread(void* _cur_dev){
 	int i;

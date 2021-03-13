@@ -24,24 +24,25 @@
 int cmpxchg16b(__m128 ptr,__m128 cval,__m128 dval,__m128 rval){
 	u8 cond;
 	static u16 cmpxchg16b_lock = 0;
-	static u16 cmpxchg16b_init = 0;
+	static volatile u16 cmpxchg16b_init = 0;
 	static int support_cmpxchg16b;
 	u64 hash;
 	int _cpuid[4];
 	u64 rf;
 	
-	if(!cmpxchg16b_init){
-		cmpxchg16b_init = 1;
+	if(!cmpxchg1b(&cmpxchg16b_init,0,1,NULL)){
 		cpuid(1,0,_cpuid);
-		if(bt(&_cpuid[1],13)) support_cmpxchg16b = 1;
+		if(bt(&_cpuid[2],13)) support_cmpxchg16b = 1;
 		else support_cmpxchg16b = 0;
+		cmpxchg16b_init = 2;
 	}
+	while(cmpxchg16b_init == 1) pause();
 	if(support_cmpxchg16b){
 		if(rval){
 			asm volatile (
 				"lock\n\t"
 				"cmpxchg16b (%3)\n\t"
-				"setz %0\n\t"
+				"setnz %0\n\t"
 				:"=r"(cond),"=b"(*(u64*)rval),"=c"(*(((u64*)rval)+1))
 				:"r"(ptr),"b"(*(u64*)dval),"c"(*(((u64*)dval)+1)),"a"(*(u64*)cval),"d"(*(((u64*)cval)+1))
 			);
@@ -50,7 +51,7 @@ int cmpxchg16b(__m128 ptr,__m128 cval,__m128 dval,__m128 rval){
 			asm volatile (
 				"lock\n\t"
 				"cmpxchg16b (%1)\n\t"
-				"setz %0\n\t"
+				"setnz %0\n\t"
 				:"=r"(cond)
 				:"r"(ptr),"b"(*(u64*)dval),"c"(*(((u64*)dval)+1)),"a"(*(u64*)cval),"d"(*(((u64*)cval)+1))
 			);

@@ -96,6 +96,8 @@ struct _SMAP_ {
 
 
 void ShowHexs(void * _p,int Line);
+int IsNulGUID(GUID * guid);
+unsigned int ComputeCRC32(unsigned int crc,void * Data, int Len);
 
 struct _MSG_ init_msg;
 

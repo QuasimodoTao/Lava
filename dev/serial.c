@@ -29,6 +29,8 @@
 #include <spinlock.h>
 #include <stdio.h>
 #include <eisa.h>
+#include <fs.h>
+#include <fctrl.h>
 /*
 
 115200 Hz
@@ -311,11 +313,8 @@ static LPSTREAM open_serial(wchar_t * name,u64 mode,struct _FCPEB_ * fc){
 	_port->flags = PORT_BUSY;
 	_port->data->count = 0;
 	file = kmalloc(sizeof(STREAM),0);
+	memset(file,0,sizeof(STREAM));
 	file->gst = GST_FILE;
-	file->flags = 0;
-	file->read_pos = 0;
-	file->write_pos = 0;
-	file->data = NULL;
 	file->fc = fc;
 	LF(rf);
 	return file;
@@ -368,21 +367,10 @@ static FCPEB serial_fc = {
 	.close = close_serial,
 	.read = serial_read,
 	.write = serial_write,
-	.seek_get = NULL,
-	.seek_put = NULL,
-	.tell_get = NULL,
-	.tell_put = NULL,
 	.get = serial_get,
 	.put = serial_put,
-	.read_block = NULL,
-	.write_block = NULL,
 	.fresh_get = serial_fresh,
-	.fresh_put = serial_fresh,
-	.get_size = NULL,
-	.set_size = NULL,
-	.get_count = NULL,
-	.set_count = NULL,
-	.data = NULL
+	.fresh_put = serial_fresh
 };
 void serial_init(){
 	int i;
@@ -416,7 +404,7 @@ void serial_init(){
 		port[i].data->fc.data = &port[i];
 		create_semaphore_ex(SERIAL_FIFO_SIZE,0,&(port[i].data->semaphore));
 		wsprintf(port[i].data->path,SERIAL_COM_PATH_LEN,L".dev/serial/COM%d.dev",i + 1);
-		fs_map(port[i].data->path,&(port[i].data->fc));
+		fs_map(port[i].data->path,&(port[i].data->fc),NULL);
 	}
 	irq_enable(EISA_SERIAL1_IRQ);
 	irq_enable(EISA_SERIAL2_IRQ);

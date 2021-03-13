@@ -1,3 +1,22 @@
+/*
+	tools/dop/dop.h
+	Copyright (C) 2020  Quasimodo
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+*/
+
 #ifndef _DOP_H_
 #define _DOP_H_
 
@@ -54,130 +73,6 @@ int IsNulGUID(GUID * guid);
 int (*CreateGuid)(GUID * pid);
 
 #define VHD_MAP_NAME	L"/.dev/vhd0.dev"
-
-#define AP_GENERAL_CONFIG					0
-#define APGC_RESPONSE_INCOMPLETE	0x0004
-#define APGC_ATA_DEVICE				0x8000
-#define AP_SPECIFIC_CONFIG					2
-#define AP_SERIAL_NUMBER					10
-#define AP_SERIAL_NUMBER_LEN		10
-#define AP_FIRMWARE_REVISION				23
-#define AP_FIRMWARE_REVISION_LEN	4
-#define AP_MODEL_NUMBER						27
-#define AP_MODEL_NUMBER_LEN			20
-#define AP_SECTORS_PER_TRANSFER				47
-#define APSPT_MASK					0x00ff
-#define AP_TRUST_FEATURE					48
-#define AP_TRUSE_FEATURE_SUP		0x0001
-#define AP_CAP1								49
-#define APC_DMA_SUPPOSE				0x0100
-#define APC_LBA_SUPPOSE				0x0200
-#define APC_IORDY_DISABLE			0x0400
-#define APC_IORDY_SUPPOSE			0x0800
-#define APC_STANDBY_TMR_SUP			0x2000
-#define AP_CAP2								50
-#define APC_STANDBY_TMR_MIN			0x0001
-#define AP_CAP3								53
-#define APC_REPORT70_64_VAILD		0x0002
-#define APC_REPORT88_VAILD			0x0004
-#define APC_FREE_FALL_CONTROL_SEN	0xff00
-#define AP_CUR_SECTORS_PER_TRANSFER			59
-#define APCSPT_MASK					0x00ff
-#define APCSPT_MULT_LOG_SEC_VAILD	0x0100
-#define AP_SEC_CNT_28_0						60
-#define AP_SEC_CNT_28_1						61
-#define AP_MULT_DMA_FEA						63
-#define APMDF_MODE_0_SUP			0x0001
-#define APMDF_MODE_1_SUP			0x0002
-#define APMDF_MODE_2_SUP			0x0004
-#define APMDF_MODE_0_SEL			0x0100
-#define APMDF_MODE_1_SEL			0x0200
-#define APMDF_MODE_2_SEL			0x0400
-#define AP_PIO_SUPPOSE						64
-#define APPS_MASK					0x00ff
-#define AP_MIN_DMA_CYCLE					65
-#define AP_MAN_REC_DMA_CYCLE				66
-#define AP_MIN_PIO_CYCLE					67
-#define AP_MIN_PIO_IORDY_CYCLE				68
-#define AP_QUEUE_DEPTH						75
-#define APQD_MASK					0x001f
-#define AP_SATA_CAP							76
-#define APSC_GEN1_SUPPOSE			0x0002
-#define APSC_GEN2_SUPPOSE			0x0004
-#define APSC_NCQ_SUPPOSE			0x0100
-#define APSC_HOST_POWER_INIT_SUP	0x0200
-#define APSC_PHY_EVENT_CNT_SUP		0x0400
-#define AP_SATA_FEA							78
-#define APSF_NZ_OFFSET_SUP			0x0002
-#define APSF_DMA_SETUP_AUTO_SUP		0x0004
-#define APSF_POWER_MAN_INIT_SUP		0x0008
-#define APSF_IN_ORDER_DATA_SUP		0x0010
-#define APSF_SOFT_SET_PRESE_SUP		0x0040
-#define AP_SATA_FEA_ENABLE					79
-#define APSFE_NZ_BUF_OFFSET_EN		0x0002
-#define APSFE_DMA_SETUP_AUTO_EN		0x0004
-#define APSFE_POWER_MAN_INIT_EN		0x0008
-#define APSFE_IN_ORDER_DATA_EN		0x0010
-#define APSFE_SOFT_SET_PRESE_EN		0x0040
-#define AP_MAJOR_VERSION					80
-#define APMV_ATA_PI_4				0x0010
-#define APMV_ATA_PI_5				0x0020
-#define APMV_ATA_PI_6				0x0040
-#define APMV_ATA_PI_7				0x0080
-#define APMV_ATA8					0x0100
-#define AP_MINOR_VERSION					81
-#define AP_CMD_FEA_SETS1					82
-#define APCFS_SMART_SUP				0x0001
-#define APCFS_SECURITY_SUP			0x0002
-#define APCFS_POWER_MAN_SUP			0x0008
-#define APCFS_PACKET_SUP			0x0010
-#define APCFS_VOLATILE_CACHE_SUP	0x0020
-#define APCFS_READ_LOOK_AHEAD_SUP	0x0040
-#define APCFS_RELEASE_INT_SUP		0x0080
-#define APCFS_SERVICE_IN_SUP		0x0100
-#define APCFS_SEVICE_RESTAR_SUP		0x0200
-#define APCFS_HBA_SUP				0x0400
-#define APCFS_WRITE_BUFFER_SUP		0x1000
-#define APCFS_READ_BUFFER_SUP		0x2000
-#define APCFS_NOP_SUP				0x4000
-#define AP_CMD_FEA_SETS2					83
-#define APCFS_DOWNLOAD_MICROCODE_SUP	0x0001
-#define APCFS_TCQ_FEA_SUP			0x0002
-#define APCFS_CFA_FEA_SUP			0x0004
-#define APCFS_APM_FEA_SUP			0x0008
-#define APCFS_PUIS_FEA_SUP			0x0020
-#define APCFS_SET_FEATURES_NEED		0x0040
-#define APCFS_SET_MAX_SUP			0x0100
-#define APCFS_AAM_SUP				0x0200
-#define APCFS_LBA48_SUP				0x0400
-#define APCFS_DCO_SUP				0x0800
-#define APCFS_FLUSH_CACHE_SUP		0x1000
-#define APCFS_FLUSH_CACHE_EXT_SUP	0x2000
-#define AP_CMD_FEA_SETS3					84
-#define APCFS_SMART_LOG_SUP			0x0001
-#define APCFS_SMART_ST_SUP			0x0002
-#define APCFS_SERIAL_NUMBER_SUP		0x0004
-//The Media Card Pass Through Command feature set is supported
-//The Streaming feature set is supported
-#define APCFS_GPL_SUP				0x0020
-//
-
-#define AP_SEC_CNT_48_0						100
-#define AP_SEC_CNT_48_1						101
-#define AP_SEC_CNT_48_2						102
-#define AP_SEC_CNT_48_3						103
-
-#define AP_PHY_SEC_SIZE						106
-#define APPSS_LOG_SHIF				0x0004
-#define APPSS_LOG_SEC_MAX			0x0100
-#define APPSS_LOG_SEC_PRE_PHY		0x0200
-
-#define AP_LOGIC_SEC_SIZE_0					117
-#define AP_LOGIC_SEC_SIZE_1					118
-
-#define AP_CUR_SERIAL_NUMBER				176
-#define AP_CUR_SERIAL_NUMBER_LEN	10
-
 
 #define ESP_GUID	((GUID){0xc12a7328, 0xf81f, 0x11d2, { \
 	0xba, 0x4b, 0x00, 0xa0, 0xc9, 0x3e, 0xc9, 0x3b }})
