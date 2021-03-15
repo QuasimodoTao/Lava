@@ -59,8 +59,12 @@ struct LFS_DATA {
 	FSCTRL fs;
 };
 
-#define BH_NEXT(_bh)	((struct _BUFFER_HEAD_ *)((_bh)->edata1))
-#define BH_SON(_bh)		((struct _BUFFER_HEAD_ *)((_bh)->edata2))
+#define MONOPOLIZE_BIT		0
+#define MONOPOLIZE			(1 << MONOPOLIZE_BIT)
+
+#define FILE_EDATA_NODE		0
+#define BUF_EDATA_ATTR		0
+#define FILE_TABLE_INDEX	1
 
 static uint32_t lfs_inter_blockv2r(struct LFS_DATA* lfs, struct _BUFFER_HEAD_* _node, uint32_t vblock);
 static int lfs_inter_list(struct LFS_DATA* lfs, struct _BUFFER_HEAD_* _node, uint32_t vblock, uint32_t rblock);
@@ -217,8 +221,10 @@ static uint32_t lfs_inter_alloc_node(struct LFS_DATA* lfs) {
 
 	head = lfs->head->addr;
 	res = xaddd(&head->first_free_node,1);
-	if(!res) return 0;
-	res = head->first_free_node;
+	if(!res) {
+		head->first_free_node = 0;
+		return 0;
+	}
 	bdirty(lfs->head);
 	index = res % (4096 / 128);
 	vblock = res / (4096 / 128);
@@ -235,7 +241,7 @@ static uint32_t lfs_inter_alloc_node(struct LFS_DATA* lfs) {
 		memset(bh->addr, 0, 4096);
 		bfree(bh);
 	}
-	head->first_free_node++;
+	printk("lfs_inter_alloc_node():%d.\n",res);
 	return res;
 }
 static uint32_t lfs_inter_blockv2r(struct LFS_DATA * lfs,struct _BUFFER_HEAD_ * _node,uint32_t vblock) {
@@ -612,7 +618,6 @@ static LPSTREAM lfs_open_file(wchar_t * name,u64 mode, struct _SIMPLE_PATH_* _pa
 	uint32_t inode;
 	uint32_t i,j,k;
 
-	wprintk(L"lfs_open_file():%s.\n",name);
 	lfs = _path->fs->data;
 	_cur_path = _path->data;
 	inode = ((struct LFS_NODE*)(_cur_path->addr))->inode;
@@ -692,17 +697,28 @@ retry_scan_file:
 	node = lfs_inter_syn_nread(lfs, inode);
 	if (!node) return NULL;
 	
+	if(mode & FS_OPEN_MONOPOLIZE && spin_try_lock_bit(node->edata.idata + BUF_EDATA_ATTR,MONOPOLIZE_BIT)) {
+		bfree(node);
+		return NULL;
+	}
 	file = kmalloc(sizeof(STREAM),0);
 	if (!file) {
+		if(mode & FS_OPEN_MONOPOLIZE) spin_unlock_bit(node->edata.idata + BUF_EDATA_ATTR,MONOPOLIZE_BIT);
 		bfree(node);
 		return NULL;
 	}
 	i = insert_file(lfs->file_table,file);
+	if(i < 0){
+		if(mode & FS_OPEN_MONOPOLIZE) spin_unlock_bit(node->edata.idata + BUF_EDATA_ATTR,MONOPOLIZE_BIT);
+		bfree(node);
+		kfree(file);
+		return NULL;
+	}
 	memset(file, 0, sizeof(STREAM));
-	file->edata.idata[2] = i;
+	file->edata.idata[FILE_TABLE_INDEX] = i;
 	file->fc = &lfs->fc;
 	file->mode = (int)mode;
-	file->edata.pdata[0] = node;
+	file->edata.pdata[FILE_EDATA_NODE] = node;
 	return file;
 }
 static int lfs_close(LPSTREAM file) {
@@ -712,11 +728,11 @@ static int lfs_close(LPSTREAM file) {
 	uint32_t i;
 
 	lfs = file->fc->data;
-	node = file->edata.pdata[0];
-	if(remove_file(lfs->file_table,file,file->edata.idata[2]))
+	node = file->edata.pdata[FILE_EDATA_NODE];
+	if(remove_file(lfs->file_table,file,file->edata.idata[FILE_TABLE_INDEX]))
 		return -1;
 	if(file->mode & FS_OPEN_MONOPOLIZE)
-		lock_andq(&node->edata.idata[1],~FS_OPEN_MONOPOLIZE);
+		spin_unlock_bit(node->edata.idata + BUF_EDATA_ATTR,MONOPOLIZE_BIT);
 	bfree(node);
 	kfree(file);
 	return -1;
@@ -728,7 +744,7 @@ static int lfs_read(LPSTREAM file, size_t count, void * buf) {
 	struct LFS_NODE* _node;
 
 	lfs = file->fc->data;
-	node = file->edata.pdata[0];
+	node = file->edata.pdata[FILE_EDATA_NODE];
 	_node = node->addr;
 	ret = lfs_simple_read(lfs, node, file->read_pos, buf, (uint32_t)count);
 	file->read_pos += count;
@@ -744,23 +760,28 @@ static int lfs_write(LPSTREAM file, size_t count, void* buf) {
 	int ret;
 	struct LFS_NODE* _node;
 
+	printk("lfs_write_file().\n");
 	lfs = file->fc->data;
-	node = file->edata.pdata[0];
+	node = file->edata.pdata[FILE_EDATA_NODE];
 	_node = node->addr;
-	if (node->edata.idata[0] & EATTR_MONOPOLIZE && !(file->mode & FS_OPEN_MONOPOLIZE)) return -1;
+	if (node->edata.idata[BUF_EDATA_ATTR] & MONOPOLIZE && !(file->mode & FS_OPEN_MONOPOLIZE)) return -1;
+	while(buf_lock(node,0,sizeof(struct LFS_NODE) - 1)) wait(0);
+	printk("write file.\n");
 	ret = lfs_simple_write(lfs, node, file->write_pos, buf,(uint32_t) count);
 	file->write_pos += count;
+	printk("file pos:%d.\n",file->write_pos);
 	if (_node->file_size < file->write_pos) {
 		bdirty(node);
 		_node->file_size = file->write_pos;
 	}
+	buf_unlock(node,0);
 	return ret;
 }
 static int lfs_seek_g(int64_t Pos, int Org, LPSTREAM file) {
 	struct _BUFFER_HEAD_* node;
 	struct LFS_NODE* _node;
 
-	node = file->edata.pdata[0];
+	node = file->edata.pdata[FILE_EDATA_NODE];
 	_node = node->addr;
 	if (Org == SEEK_SET) {
 		file->read_pos = Pos;
@@ -781,7 +802,7 @@ static int lfs_seek_p(int64_t Pos, int Org, LPSTREAM file) {
 	struct _BUFFER_HEAD_* node;
 	struct LFS_NODE* _node;
 
-	node = file->edata.pdata[0];
+	node = file->edata.pdata[FILE_EDATA_NODE];
 	_node = node->addr;
 	if (Org == SEEK_SET) {
 		file->write_pos = Pos;
@@ -811,15 +832,17 @@ static int lfs_put(int Element, LPSTREAM file) {
 	struct LFS_NODE* _node;
 
 	lfs = file->fc->data;
-	node = file->edata.pdata[0];
+	node = file->edata.pdata[FILE_EDATA_NODE];
 	_node = node->addr;
-	if (node->edata.idata[0] & EATTR_MONOPOLIZE && !(file->mode & FS_OPEN_MONOPOLIZE)) return -1;
+	if (node->edata.idata[BUF_EDATA_ATTR] & MONOPOLIZE && !(file->mode & FS_OPEN_MONOPOLIZE)) return -1;
+	while(buf_lock(node,0,sizeof(struct LFS_NODE) - 1)) wait(0);
 	ret = lfs_simple_read(lfs, node, file->write_pos, &Element, 1);
 	file->write_pos += 1;
 	if (_node->file_size < file->write_pos) {
 		bdirty(node);
 		_node->file_size = file->write_pos;
 	}
+	buf_unlock(node,0);
 	return ret;
 }
 static int lfs_get(LPSTREAM file) {
@@ -830,7 +853,7 @@ static int lfs_get(LPSTREAM file) {
 	struct LFS_NODE* _node;
 
 	lfs = file->fc->data;
-	node = file->edata.pdata[0];
+	node = file->edata.pdata[FILE_EDATA_NODE];
 	_node = node->addr;
 	ret = lfs_simple_read(lfs, node, file->read_pos, &Element, 1);
 	file->read_pos += 1;
@@ -845,7 +868,7 @@ static int64_t lfs_get_size(LPSTREAM file) {
 	struct _BUFFER_HEAD_* node;
 	struct LFS_NODE* _node;
 
-	node = file->edata.pdata[0];
+	node = file->edata.pdata[FILE_EDATA_NODE];
 	_node = node->addr;
 	return _node->file_size;
 }
@@ -935,6 +958,10 @@ static int lfs_simple_write(struct LFS_DATA* lfs, struct _BUFFER_HEAD_* node, ui
 	struct _BUFFER_HEAD_* bh;
 	struct LFS_NODE* _node;
 	
+	if(!buf_islock(node,0)){
+		printk("BUG:lfs_simple_write():node must be lock before call.\n");
+		stop();
+	}
 	_node = node->addr;
 	if(_node->attr & NODE_ATTR_DATA){
 		if (off + cnt <= NODE_ZONE_32_MAX * 4) {
@@ -1073,7 +1100,7 @@ static uint32_t lfs_try_create_file(struct LFS_DATA* lfs, struct _BUFFER_HEAD_* 
 
 	printk("lfs_try_create_file().\n");
 	node = _node->addr;
-    buf_lock(_node,0,sizeof(struct LFS_NODE) - 1);
+    while(buf_lock(_node,0,sizeof(struct LFS_NODE) - 1)) wait(0);
     if(off != node->file_size){
         buf_unlock(_node,0);
         return 0;
@@ -1189,8 +1216,8 @@ int unsummon_lfs(HANDLE _fs) {
 		bfree(lfs->bad);
 		buf_unlock(lfs->head, 0);
 		bfree(lfs->head);
+		fs_unmap(lfs->map_path);
 	}
-	fs_unmap(lfs->map_path);
 	close(lfs->part);
 	kfree(lfs);
 	return 0;

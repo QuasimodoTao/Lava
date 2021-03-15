@@ -82,6 +82,7 @@ struct _BUFFER_HEAD_* syn_hl_blink(struct _BUFFER_HEAD_* _bh, uint32_t byte_off,
 void * bealloc(struct _BUFFER_HEAD_ * bh,size_t size,unsigned int align);
 int buf_lock(struct _BUFFER_HEAD_* bh, uint32_t start, uint32_t end);
 int buf_unlock(struct _BUFFER_HEAD_* bh, uint32_t start);
+int buf_islock(struct _BUFFER_HEAD_* bh, uint32_t pos);
 int bfree(struct _BUFFER_HEAD_* bh);
 int bsync(struct _LL_BLOCK_DEV_* dev);
 u64 bclean();

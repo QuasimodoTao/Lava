@@ -24,7 +24,7 @@
 #include <lava.h>
 #include <mm.h>
 
-void private_data_init(){
+void INIT_CODE private_data_init(){
 	u64 page;
 	struct _PRIVATE_DATA_ * private_data;
 	u16 selector;

@@ -22,6 +22,123 @@
 
 #include <stddef.h>
 
+/*
+0x0000,0x0000,"Non-VGA-Compatible devices"
+0x0000,0x0001,"VGA-Compatible Device"
+0x0001,0x0000,"SCSI Bus Controller"
+0x0001,0x0001,"ISA Compatibility mode-only controller"
+0x0001,0x0002,"Floppy Disk Controller"
+0x0001,0x0003,"IPI Bus Controller"
+0x0001,0x0004,"RAID Controller"
+0x0001,0x0005,"ATA Controller"
+0x0001,0x0006,open,"Serial ATA"
+0x0001,0x0007,"Serial Attached SCSI"
+0x0001,0x0008,"Non-Volatile Memory Controller"
+0x0001,0x0080,"Unknow Mass Storage Controller"
+0x0002,0x0000,"Ethernet Controller"
+0x0002,0x0001,"Token Ring Controller"
+0x0002,0x0002,"FDDI Controller"
+0x0002,0x0003,"ATM Controller"
+0x0002,0x0004,"ISDN Controller"
+0x0002,0x0005,"WorldFip Controller"
+0x0002,0x0006,"PICMG 2.14 Multi Computing"
+0x0002,0x0007,"Infiniband Controller"
+0x0002,0x0008,"Fabric Controller"
+0x0002,0x0080,"Unknow Network Controller"
+0x0003,0x0000,"VGA Compatible Controller"
+0x0003,0x0001,"XGA Controller"
+0x0003,0x0002,"3D Controller (Not VGA-Compatible)"
+0x0003,0x0080,"Unknow Display Controller"
+0x0004,0x0000,"Multimedia Video Controller"
+0x0004,0x0001,"Multimedia Audio Controller"
+0x0004,0x0002,"Computer Telephony Device"
+0x0004,0x0003,"Audio Device"
+0x0004,0x0080,"Unknow Multimedia Controller"
+0x0005,0x0000,"RAM Controller"
+0x0005,0x0001,"Flash Controller"
+0x0005,0x0080,"Unknow Memory Controller"
+0x0006,0x0000,"Host Bridge"
+0x0006,0x0001,"ISA Bridge"
+0x0006,0x0002,"EISA Bridge"
+0x0006,0x0003,"MCA Bridge"
+0x0006,0x0004,"PCI-to-PCI Bridge"
+0x0006,0x0005,"PCMCIA Bridge"
+0x0006,0x0006,"NuBus Bridge"
+0x0006,0x0007,"CardBus Bridge"
+0x0006,0x0008,"RACEway Bridge"
+0x0006,0x0009,"PCI-to-PCI Bridge"
+0x0006,0x000a,"InfiniBand-to-PCI Host Bridge"
+0x0006,0x0080,"Unknow Bridge Device"
+0x0007,0x0000,"Serial Controller"
+0x0007,0x0001,"Parallel Controller"
+0x0007,0x0002,"Multiport Serial Controller"
+0x0007,0x0003,"Modem"
+0x0007,0x0004,"IEEE 488.1/2 (GPIB) Controller"
+0x0007,0x0005,"Smart Card"
+0x0007,0x0080,"Unknow Simple Communication Controller"
+0x0008,0x0000,"PIC"
+0x0008,0x0001,"DMA Controller"
+0x0008,0x0002,"Timer"
+0x0008,0x0003,"RTC Controller"
+0x0008,0x0004,"PCI Hot-Plug Controller"
+0x0008,0x0005,"SD Host controller"
+0x0008,0x0006,"IOMMU"
+0x0008,0x0080,"Unknow Base System Peripheral"
+0x0009,0x0000,"Keyboard Controller"
+0x0009,0x0001,"Digitizer Pen"
+0x0009,0x0002,"Mouse Controller"
+0x0009,0x0003,"Scanner Controller"
+0x0009,0x0004,"Gameport Controller"
+0x0009,0x0080,"Unknow Input Device Controller"
+0x000a,0x0000,"Generic Docking Station"
+0x000a,0x0080,"Unknoe Docking Station"
+0x000b,0x0000,"i386 Procrssor"
+0x000b,0x0001,"i486 Processor"
+0x000b,0x0002,"Pentium"
+0x000b,0x0003,"Pentium Pro"
+0x000b,0x0010,"Alpha"
+0x000b,0x0020,"PowerPC"
+0x000b,0x0030,"MIPS"
+0x000b,0x0040,"Co-Processor"
+0x000b,0x0080,"Unknow Processor"
+0x000c,0x0000,"FireWire (IEEE 1394) Controller"
+0x000c,0x0001,"ACCESS Bus"
+0x000c,0x0002,"SSA"
+0x000c,0x0003,"USB Controller"
+0x000c,0x0004,"Fibre Channel"
+0x000c,0x0005,"SMBus"
+0x000c,0x0006,"InfiniBand"
+0x000c,0x0007,"IPMI Interface"
+0x000c,0x0008,"SERCOS Interface (IEC 61491)"
+0x000c,0x0080,"Unknow Serial Bus Controller"
+0x000d,0x0000,"iRDA Compatible Controller"
+0x000d,0x0001,"Consumer IR Controller"
+0x000d,0x0010,"RF Controller"
+0x000d,0x0011,"Bluetooth Controller"
+0x000d,0x0012,"Broadband Controller"
+0x000d,0x0020,"Ethernet Controller (802.1a)"
+0x000d,0x0021,"Ethernet Controller (802.1b)"
+0x000d,0x0080,"Unknow Wireless Controller"
+0x000e,0x0000,"I20"
+0x000f,0x0001,"Satellite TV Controller"
+0x000f,0x0002,"Satellite Audio Controller"
+0x000f,0x0003,"Satellite Voice Controller"
+0x000f,0x0004,"Satellite Data Controller"
+0x0010,0x0000,"Network and Computing Encrpytion/Decryption"
+0x0010,0x0010,"Entertainment Encryption/Decryption"
+0x0010,0x0080,"Other Encryption/Decryption"
+0x0011,0x0000,"DPIO Modules"
+0x0011,0x0001,"Performance Counters"
+0x0011,0x0010,"Communication Synchronizer"
+0x0011,0x0020,"Signal Processing Management"
+0x0011,0x0080,"Unknow Signal Processing Controller"
+0x0012,0xffff,"Processing Accelerator"
+0x0013,0xffff,"Non-Essential Instrumentation"
+0x0040,0xffff,"Co-Processor"
+0x00FF,0xffff,"Unassigned Class (Vendor specific)"
+*/
+
+
 #define PCI_CONFIG_ADDRESS	0xcf8
 #define PCI_CONFIG_DATA		0xcfc
 
@@ -119,6 +236,23 @@
 #define PCI_C2_BUS		0xcfa
 #define PCI_C2_REGB		0xc000
 
+struct _PCI_DEV_MODULE_ {
+	HANDLE (*construct)(struct _PCIDEV_ * dev);
+	void (*destruct)(struct _PCIDEV_ * dev,HANDLE ctrl);
+	short class_code;
+	short subclass_code;
+	short program_flag; 
+	const char * name;
+};
+
+#define PCI_DEV_MODULE_SECTION_NAME		".pcidev"
+
+#define PCI_DEV_MODULE(cons,des,_class,sub,progif,name)	\
+static struct _PCI_DEV_MODULE_ __attribute__((__used__,__section__(PCI_DEV_MODULE_SECTION_NAME))) pci_dev_module_##name = {\
+	cons,des,_class,sub,progif,#name\
+};
+
+
 typedef struct _PCIDEV_ {
 	u8 bus;
 	u8 dev;
@@ -131,6 +265,8 @@ typedef struct _PCIDEV_ {
 	u16 vendor;
 	u16 device;
 	u8 lock;
+	wchar_t name[24];// L"/.dev/pci/bbb-dd-f.dev"
+
 	void * ctrl;
 	int (*int_handle)(struct _PCIDEV_ *,void * ctrl,u16);
 	int (*restart)(struct _PCIDEV_ *,void * ctrl);

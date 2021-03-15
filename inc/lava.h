@@ -98,6 +98,7 @@ struct _SMAP_ {
 void ShowHexs(void * _p,int Line);
 int IsNulGUID(GUID * guid);
 unsigned int ComputeCRC32(unsigned int crc,void * Data, int Len);
+struct _PE_SECTION_ * get_section_addr(const char * sname);
 
 struct _MSG_ init_msg;
 
@@ -121,8 +122,8 @@ struct _MSG_ init_msg;
 
 #define _In
 #define _Out
-#define INIT	__attribute__((section(".init")))
-
+#define INIT_CODE	__attribute__((section(".cinit")))
+#define INIT_DATA	__attribute__((section(".dinit")))
 
 
 

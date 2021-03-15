@@ -28,12 +28,15 @@
 #include <graph.h>
 #include <fctrl.h>
 #include <buffer.h>
+#include <pe.h>
 
 struct _TASK_{
 	int lock;
 	int need;//多个项目的need字段组成一个邻接矩阵，构成网，网中不能有回路
-	void (*task)();
-	char * str;
+	void (*construction)();
+	//void (*destruction)();
+	char * cstr;
+	//char * dstr;
 };
 
 void paging_init_ap();
@@ -41,7 +44,6 @@ int paging_init_bp(u64 memory_start,u64 memory_size);
 void sdt_init_bp();
 void irq_init();
 void sdt_init_ap();
-
 void lapic_init();
 void apic_enable();
 void mp_init();
@@ -53,23 +55,20 @@ void fs_init();
 void arch_init_ap();
 void private_data_init();
 void syscall_init();
-void gui_init();
 void buf_init();
 void file_table_init();
 
-void serial_init();
-void ps2_kbd_init();
-void int86_init();
-void vbe_init();
-void pci_init();
-void pit_init();
-void time_init();
 
-int getchar();
+void gui_init();
+void pit_init();
+void int86_init();
+void pci_init();
+void ps2_kbd_init();
+void vbe_init();
+void time_init();
+void serial_init();
 
 void back_to_user_mode(u64 rip,u64 rflags,u64 rsp,u64 cs);
-extern u8 user_code[];
-extern int user_code_size;
 
 static struct _TASK_ task[] = {
 	{0,0,gui_init,"gui_init().\n"},
@@ -81,7 +80,35 @@ static struct _TASK_ task[] = {
 	{0,1,time_init,"time_init().\n"},
 	{0,1,serial_init,"serial_init().\n"}
 };
-int lock = 0;
+void __attribute__((noreturn)) shut_down(int type){
+	bsync(NULL);
+	while(1) halt();
+}
+
+static struct _PE_SECTION_ * section_base;
+static int section_count;
+struct _PE_SECTION_ * get_section_addr(const char * sname){
+	char name_tmp[8];
+	int i;
+
+	if(!sname || !sname[0]) return NULL;
+	i = 0;
+	do{
+		if(!sname[i]) break;
+		name_tmp[i] = sname[i];
+		i++;
+	} while(i <8);
+	if(i < 8){
+		do{
+			name_tmp[i] = 0;
+			i++;
+		} while(i < 8);
+	}
+	for(i = 0;i < section_count;i++){
+		if(!memcmp(section_base[i].Name,name_tmp,8)) return section_base + i;
+	}
+	return NULL;
+}
 
 int test_thread(void * none){
 	LPSTREAM test_file;
@@ -94,9 +121,26 @@ int test_thread(void * none){
 		wprintk(L"打开文件成功了。\n");
 		wprintk(L"%P.\n",test_file);
 		read(test_file,256,tmp);
-		ShowHexs(tmp,256/16);
+		//ShowHexs(tmp,256/16);
+		close(test_file);
 	}
 	else wprintk(L"打开文件失败了。\n");
+	test_file = open(L"/system/test1.txt",FS_OPEN_READ | FS_OPEN_WRITE,NULL,NULL);
+	if(test_file) {
+		if(write(test_file,256,tmp)) printk("write file fail.\n");
+		close(test_file);
+	}
+	test_file = open(L"/system/test2.txt",FS_OPEN_READ | FS_OPEN_WRITE,NULL,NULL);
+	if(test_file) {
+		if(write(test_file,256,tmp)) printk("write file fail.\n");
+		close(test_file);
+	}
+	test_file = open(L"/system/test3.txt",FS_OPEN_READ | FS_OPEN_WRITE,NULL,NULL);
+	if(test_file) {
+		if(write(test_file,256,tmp)) printk("write file fail.\n");
+		close(test_file);
+	}
+	shut_down(0);
 	while(1) halt();
 }
 int test_thread2(void * none){
@@ -128,7 +172,6 @@ int test_thread2(void * none){
 	//	printk("tick:%d.i:%d.\n",ticks,i);
 	//}
 }
-
 int test_thread3(void * none){
 	int i = 0;
 	LPSTREAM hd;
@@ -153,7 +196,6 @@ int test_thread3(void * none){
 		halt();
 	}
 }
-
 int init_thread_entry(void*none){
 	int i,j;
 	u64 * double_fault_stack;
@@ -176,8 +218,8 @@ int init_thread_entry(void*none){
 			}
 		}
 		if(!spin_try_lock_bit(&(task[i].lock),0)){
-			task[i].task();
-			print(task[i].str);
+			task[i].construction();
+			print(task[i].cstr);
 			bts(&(task[i].lock),1);
 			xaddd(&finished,1);
 		}
@@ -191,7 +233,7 @@ int init_thread_entry(void*none){
 	}
 	while(1) halt();
 }
-void __attribute__((noreturn)) ap_entry_point(){//AP start at here
+void __attribute__((noreturn)) INIT_CODE ap_entry_point(){//AP start at here
 	paging_init_ap();
 	sdt_init_ap();
 	private_data_init();
@@ -201,9 +243,16 @@ void __attribute__((noreturn)) ap_entry_point(){//AP start at here
 	//stop();
 	schedule_init_ap(init_thread_entry);
 }
-void  __attribute__((noreturn)) entry_point(struct _MSG_ * msg){//BSP start at here
+void  __attribute__((noreturn)) INIT_CODE  entry_point(struct _MSG_ * msg){//BSP start at here
+	struct _MZ_HEAD_ * head;
+	struct _PEP_HEAD_ * pe_head;
+
 	processor_count = 0;
 	memcpy(&init_msg,msg,sizeof(struct _MSG_));
+	head = ADDRP2V(init_msg.KernelImagePBase);
+	pe_head = ADDRP2V(init_msg.KernelImagePBase + head->PEHead);
+	section_base = (void*)(sizeof(struct _PEP_HEAD_) + (char*)(pe_head));
+	section_count = pe_head->NumberOfSections;
 	paging_init_bp(init_msg.MemoryStart + init_msg.ATACount * AHCI_PORT_SPACE_SIZE,init_msg.MemorySize);
 	bts((void*)PROCESS_INIT_MUTEX,0);
 	ker_heap_init();

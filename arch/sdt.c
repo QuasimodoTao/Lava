@@ -53,7 +53,7 @@ void make_error(){
 	lidt(&idtr);
 	asm("ud2");
 }
-u16 put_TSS(struct _TSS_64_ * tss){
+u16 INIT_CODE put_TSS(struct _TSS_64_ * tss){
 	u64 dtl;
 	u16 selector;
 	static u32 gdt_first_free = (FIRST_SELECTOR >> 3) + 6;
@@ -68,7 +68,7 @@ u16 put_TSS(struct _TSS_64_ * tss){
 	selector <<= 3;
 	return selector;
 }
-void make_gate(int vector,u64 addr,int ist,int dpl,int type){
+void INIT_CODE make_gate(int vector,u64 addr,int ist,int dpl,int type){
 	u64 idtel = 0x0000800000100000;
 	
 	type &= 0x0f;
@@ -82,7 +82,7 @@ void make_gate(int vector,u64 addr,int ist,int dpl,int type){
 	idt[vector * 2] = idtel;
 	idt[vector * 2 + 1] = (addr >> 32) & 0x00000000ffffffff;
 }
-int sdt_init_bp(){
+int INIT_CODE sdt_init_bp(){
 	int i;
 	u64 idteh,idtel;
 	
@@ -149,7 +149,7 @@ int sdt_init_bp(){
 	lidt(&idtr);
 	return 0;
 }
-void sdt_init_ap(){
+void INIT_CODE sdt_init_ap(){
 	lgdt(&gdtr);
 	lidt(&idtr);
 	sss(KERNEL_SS);

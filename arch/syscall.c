@@ -39,7 +39,7 @@ u64 sys_call_80(u64 c,u64 d,u64 r8,u64 r9);
 u64 sys_call_82(u64 c,u64 d,u64 r8,u64 r9);
 u64 sys_call_83(u64 c,u64 d,u64 r8,u64 r9);
 
-void syscall_init(){
+void INIT_CODE syscall_init(){
 	int _cpuid[4];
 	u64 msr;
 	

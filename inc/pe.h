@@ -32,7 +32,7 @@ struct _TABLE_ {
 	u32 Base;
 	u32 Size;
 };
-struct _SECTION_ {
+struct _PE_SECTION_ {
 	char Name[8];
 	u32 VirtualSize;
 	u32 VirtualAddress;

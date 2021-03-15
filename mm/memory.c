@@ -478,6 +478,10 @@ void kfree(void * addr){
 	int i,index;
 	struct KMCB * first;
 	
+	if(!addr) {
+		printk("BUG:kfree():Try to free a unexist space.\n");
+		stop();
+	}
 	first = cur = (struct KMCB *)((((((u64)addr) & ~PAGE_IN_ADDR_MASK) - ker_heap_base)/PAGE_SIZE) + first_block);
 	if(cur->index == 31) {
 		//锁定控制块，仅允许读

@@ -412,7 +412,7 @@ int fs_unmap(const wchar_t * _path){
 	size_t name_len;
 	int is_fs = 0;
 	
-	name_len = wcslen(path);
+	name_len = wcslen(_path);
 	path_heap = kmalloc(sizeof(wchar_t) * name_len + sizeof(wchar_t),0);
 	name_len = prep_path(path_heap,_path,NULL,NULL);
 	if(!name_len) {

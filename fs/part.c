@@ -106,13 +106,12 @@ static int part_mask[32] = {0,};
 static int list_lock = 0;
 static struct _FS_LIST_{
 	GUID g_id;
-	unsigned char s_id;
 	int (*open)(const wchar_t * path);
 	const wchar_t * name;
 } fs_list[] = {
-	{{0xc12a7328, 0xf81f, 0x11d2, {0xba, 0x4b, 0x00, 0xa0, 0xc9, 0x3e, 0xc9, 0x3b }},0x00,esp_open,L"ESP"},
-	{{0xebd0a0a2, 0xb9e5, 0x4433, {0x87, 0xc0, 0x68, 0xb6, 0xb7, 0x26, 0x99, 0xc7 }},0x00,fat_open,L"FAT"},
-	{{0xa23a4c32, 0x5650, 0x47c6, {0xaf, 0x40, 0x5c, 0xd9, 0x48, 0x78, 0xc6, 0x71 }},0x00,lfs_open,L"LFS"}
+	{{0xc12a7328, 0xf81f, 0x11d2, {0xba, 0x4b, 0x00, 0xa0, 0xc9, 0x3e, 0xc9, 0x3b }},esp_open,L"ESP"},
+	{{0xebd0a0a2, 0xb9e5, 0x4433, {0x87, 0xc0, 0x68, 0xb6, 0xb7, 0x26, 0x99, 0xc7 }},fat_open,L"FAT"},
+	{{0xa23a4c32, 0x5650, 0x47c6, {0xaf, 0x40, 0x5c, 0xd9, 0x48, 0x78, 0xc6, 0x71 }},lfs_open,L"LFS"}
 };
 
 spin_optr_struct_member_bit(Disk,struct _DISK_,status,0);
@@ -527,10 +526,7 @@ int unsummon_disk(HANDLE _disk){
 				file = part->flist[i];
 				file->call_back(part->flist, file->call_back_data); 
 			}
-			else{
-				file = part->flist[i];
-				if(!cmpxchg8b(part->flist + i,file,NULL,NULL)) kfree(file);
-			}
+			else close(part->flist[i]);
 		}
 		_part = part->next;
 		fs_unmap(part->name);
@@ -542,4 +538,14 @@ int unsummon_disk(HANDLE _disk){
 	bfree(disk->head1);
 	close(disk->disk);
 	kfree(disk);
+}
+void close_all_disk(){
+	struct _DISK_ * disk,*_disk;
+	struct _PART_ * part,*_part;
+	int i;
+	LPSTREAM file;
+
+	for(disk = disk_list;disk;disk = disk->next){
+		unsummon_disk(disk);
+	}
 }

@@ -54,7 +54,7 @@ void __attribute__((noreturn)) EntryPoint(const struct _RELY_MSG_ * Msg){
 	struct _NODE_ * File;
 	struct _MZ_HEAD_ Head;
 	struct _PEP_HEAD_ pep;
-	struct _SECTION_ * Section;
+	struct _PE_SECTION_ * Section;
 	u32 Size;
 	u64 KernelEntryPoint;
 	u64 MemorySize;
@@ -278,8 +278,8 @@ void __attribute__((noreturn)) EntryPoint(const struct _RELY_MSG_ * Msg){
 			print("Unsuppose kernel image.\n");
 			stop();
 		}
-		Section = malloc(sizeof(struct _SECTION_) * pep.NumberOfSections);
-		Read(File,Section,sizeof(struct _SECTION_) * pep.NumberOfSections);
+		Section = malloc(sizeof(struct _PE_SECTION_) * pep.NumberOfSections);
+		Read(File,Section,sizeof(struct _PE_SECTION_) * pep.NumberOfSections);
 		
 		Size = Tell(File);
 		Size += pep.FileAlignment - 1;
@@ -303,7 +303,7 @@ void __attribute__((noreturn)) EntryPoint(const struct _RELY_MSG_ * Msg){
 		_Msg->FontBase = MemoryStart;
 	}
 	{//Load Font
-		File = Open(L"font.fnt");
+		File = Open(L"Font.fnt");
 		if(File){
 			Seek(0,SEEK_END,File);
 			Size = Tell(File);

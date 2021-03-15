@@ -3535,7 +3535,7 @@ bit4:I/D:	0:not instruction
 	paging_panic(reg,addr);
 	return 0;
 }
-int INIT paging_init_bp(u64 memory_start,u64 memory_size){
+int INIT_CODE paging_init_bp(u64 memory_start,u64 memory_size){
 	u64 * p4,* p3,* p2,* p1;
 	u32 p3e,p2e,p1e;
 	u32 i,j,mask_size;

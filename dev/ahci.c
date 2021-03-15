@@ -35,6 +35,7 @@ static struct _AHCI_ * ahci_list = NULL;
 static int busy = 0;
 
 
+
 static int ahci_restart(struct _PCIDEV_ * dev,struct _AHCI_ * ahci){
 	int i;
 	
@@ -160,4 +161,5 @@ struct _AHCI_ * ahci_open(LPPCIDEV dev){
 	return ahci;
 }
 
+PCI_DEV_MODULE(ahci_open,ahci_close,1,6,-1,serial_ata);
 

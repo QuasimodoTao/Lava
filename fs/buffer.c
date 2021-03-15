@@ -260,6 +260,7 @@ struct _BUFFER_HEAD_* hl_blink(struct _BUFFER_HEAD_* _bh, uint32_t byte_off, uin
 	if (!byte_off) {
 		_bh->ref_count++;
         UnlockTable(map);
+         if(ie) sti();
 		return _bh;
 	}
     if(_bh->parent){
@@ -272,6 +273,7 @@ struct _BUFFER_HEAD_* hl_blink(struct _BUFFER_HEAD_* _bh, uint32_t byte_off, uin
         if(ie) sti();
 		return bh;
     }
+    _bh->ref_count++;
     UnlockTable(map);
     bh = alloc_head();
 	memset(bh, 0, sizeof(struct _BUFFER_HEAD_));
@@ -282,7 +284,6 @@ struct _BUFFER_HEAD_* hl_blink(struct _BUFFER_HEAD_* _bh, uint32_t byte_off, uin
 	bh->buf_size = size;
 	bh->byte_off = byte_off;
 	bh->dev = _bh->dev;
-    cli();
 	LockTable(map);
     insert_list(map_table + map,bh);
     UnlockTable(map);
@@ -377,6 +378,7 @@ struct _BUFFER_HEAD_* syn_hl_blink(struct _BUFFER_HEAD_* _bh, uint32_t byte_off,
     }
     bh = alloc_head();
 	memset(bh, 0, sizeof(struct _BUFFER_HEAD_));
+    _bh->ref_count++;
 	bh->parent = _bh;
 	bh->iblock = _bh->iblock;
 	bh->ref_count = 1;
@@ -422,6 +424,11 @@ int bfree(struct _BUFFER_HEAD_* bh) {
     struct _BUFFER_HEAD_ * _bh;
 
 	if (!bh) return -1;
+    if(bh->ref_count <= 0){
+        printk("BUG:bfree():Try to free free head.\n");
+        stop();
+
+    }
     ie = IE();
 	map = mapping(bh->dev, bh->iblock);
     cli();
@@ -454,6 +461,17 @@ int bfree(struct _BUFFER_HEAD_* bh) {
     if(ie) sti();
 	return 0;
 }
+static int bsync_thread(void * _bh){
+    struct _BUFFER_HEAD_* bh;
+
+    bh = _bh;
+    printk("write block:%d.\n",bh->iblock);
+    bh->dev->write_block(bh);
+    free_page(ADDRV2P(NULL,bh->addr));
+    kfree(bh);
+    return 0;
+}
+void close_all_disk();
 int bsync(struct _LL_BLOCK_DEV_* dev) {
 	struct _BUFFER_HEAD_* bh;
 	int i;
@@ -461,19 +479,29 @@ int bsync(struct _LL_BLOCK_DEV_* dev) {
 
     ie = IE();
     if(!dev){
+        close_all_disk();
         for (i = 0;i < 256;i++) {
             while(map_table2[i]){
                 cli();
 		        LockTable2(i);
                 bh = map_table2[i];
                 map_table2[i] = bh->next;
-                if(bh->status & BH_DIRTY) bh->dev->write_block(bh);
+                if(bh->next) bh->next->prev = NULL;
                 UnlockTable2(i);
                 if(ie) sti();
-                free_page(ADDRV2P(NULL,bh->addr));
-                kfree(bh);
+                bh->next = NULL;
+                if(bh->status & BH_DIRTY) {
+                    create_thread(NULL,bsync_thread,bh);   
+                }
+                else{
+                    free_page(ADDRV2P(NULL,bh->addr));
+                    kfree(bh);
+                }
             }
 	    }
+        for(i = 0;i < 65536;i++)
+            for(bh = map_table[i];bh && !bh->byte_off;bh = bh->next)
+                printk("Occupyed head:%d.",bh->iblock);
         return 0;
     }
 	for (i = 0;i < 256;i++) {
@@ -596,7 +624,7 @@ int buf_islock(struct _BUFFER_HEAD_* bh, uint32_t pos) {
 		mask = 1;
 		_mask = lock_list->mask;
 		for (i = 0;i < BH_LOCK_LIST_SIZE;i++,mask <<= 1) 
-			if (_mask & mask && lock_list->start[i] >= pos && lock_list->end[i] < pos) 
+			if (_mask & mask && lock_list->start[i] <= pos && lock_list->end[i] > pos) 
 				return 1;
 		prev = lock_list;
 	}
