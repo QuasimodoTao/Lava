@@ -69,6 +69,7 @@ typedef struct _PART_ {
     u8 state;
     u8 s_type;
     uint32_t s_flag;
+	uint32_t soft_id;
 	int num;            //index in partition table
 	GUID type;			
 	GUID flag;			
@@ -208,6 +209,7 @@ static int part_info(LPSTREAM _part,size_t size,void * __info){
 	memcpy(&_info->g_type,&part->type,sizeof(GUID));
 	memcpy(&_info->g_disk,&disk->l_flag,sizeof(GUID));
 	_info->first_lba = part->first;
+	_info->soft_id  =part->soft_id;
 	return 0;
 }
 static FCPEB part_fc = {
@@ -498,7 +500,7 @@ HANDLE summon_disk(const wchar_t * path){
 				memcpy(&part->fc, &part_fc, sizeof(FCPEB));
 				part->fc.data = part;
 				part->num = i;
-				wsprintf(part->name,24,L"/.dev/%d.prt",get_first_part_id());
+				wsprintf(part->name,24,L"/.dev/%d.prt",part->soft_id = get_first_part_id());
 				fs_map(part->name, &part->fc, NULL);
 				create_thread(NULL,install_dfs_thread,part);
 				//summon_part

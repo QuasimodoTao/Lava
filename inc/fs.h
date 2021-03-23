@@ -55,6 +55,7 @@ struct _PART_INFO_ {
 	GUID g_type;
 	GUID g_disk;
 	u64 first_lba;
+	uint32_t soft_id;
 };
 struct _FILE_INFO_ {
 	uint32_t size;
@@ -71,7 +72,7 @@ typedef struct _STREAM_ {
 	u64 read_pos;
 	u64 write_pos;
 	void* call_back_data;
-	void(*call_back)(struct _DOPSTREAM_*, void*);
+	void(*call_back)(struct _STREAM_*, void*);
 	struct _FCPEB_* fc;
 	union{
 		void * pdata[3];
@@ -80,7 +81,7 @@ typedef struct _STREAM_ {
 } STREAM,*LPSTREAM;
 
 typedef struct _FSCTRL_{
-	struct _DOPSTREAM_ * (*open)(wchar_t * name,int mode, struct _SIMPLE_PATH_* path);
+	struct _STREAM_ * (*open)(wchar_t * name,int mode, struct _SIMPLE_PATH_* path);
 	int (*open_path)(wchar_t * name,struct _SIMPLE_PATH_ * path);
 	int (*close_path)(struct _SIMPLE_PAHT_ * path);
 	int (*seek)(wchar_t* name, struct _SIMPLE_PATH_* dest_path,struct _SIMPLE_PATH_ * my_path);

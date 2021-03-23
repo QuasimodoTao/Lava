@@ -30,15 +30,6 @@
 #define UNVAILD_IBLOCK		1
 #define EATTR_MONOPOLIZE	1
 
-struct LFS_FLIST_T{
-	char mask[64];
-	struct LFS_FLIST_T * list[512-8];
-};
-struct LFS_FLIST_L{
-	char mask[64];
-	struct _STREAM_ * flist[512-8];
-};
-
 struct LFS_DATA {
 	LPSTREAM part;
 	u8 vaild;
@@ -1138,7 +1129,7 @@ int lfs_open(const wchar_t * path){
     struct LFS_HEAD * head;
     int sec_per_block;
 
-	printk("lfs_open().\n");
+	//printk("lfs_open().\n");
     lfs = kmalloc(sizeof(struct LFS_DATA),0);
     memset(lfs,0,sizeof(struct LFS_DATA));
     lfs->part = open(path,FS_OPEN_READ | FS_OPEN_WRITE,lfs,lfs_open_call_back);
@@ -1150,38 +1141,38 @@ int lfs_open(const wchar_t * path){
     if (lfs->info.cache_block_size < 4096) {
 		close(lfs->part);
 		kfree(lfs);
-		return NULL;
+		return 0;
 	}
-    wprintk(L"open part success:%s,%P.\n",path,path);
     sec_per_block = 4096/lfs->info.logical_sector_size;
     lfs->sec_per_block_shift = BSF(&sec_per_block);
     lfs->head = lfs_inter_bread(lfs, 1);
-	if (!lfs->head) {
-		return lfs;
+    if (!lfs->head) {
+		return 0;
 	}
 	if (buf_lock(lfs->head, 0, 4096)) {
 		bfree(lfs->head);
-		return lfs;
+		return 0;
 	}
-	head = lfs->head->addr;
-    if (head->version != LFS_CUR_VERSION) {
+    head = lfs->head->addr;
+	if (head->version != LFS_CUR_VERSION) {
 		buf_unlock(lfs->head,0);
 		bfree(lfs->head);
-		return lfs;
+		return 0;
 	}
 	lfs->node = lfs_inter_bread(lfs, head->node_0_block);
 	if (!lfs->node) {
 		buf_unlock(lfs->head, 0);
 		bfree(lfs->head);
-		return lfs;
+		return 0;
 	}
-    lfs->root = hl_blink(lfs->node, sizeof(struct LFS_NODE) * 1, sizeof(struct LFS_NODE));
+	lfs->root = hl_blink(lfs->node, sizeof(struct LFS_NODE) * 1, sizeof(struct LFS_NODE));
 	lfs->bad = hl_blink(lfs->node, sizeof(struct LFS_NODE) * 2, sizeof(struct LFS_NODE));
 	lfs->map = hl_blink(lfs->node, sizeof(struct LFS_NODE) * 3, sizeof(struct LFS_NODE));
 	lfs->my_path.data = lfs;
 	lfs->my_path.fs = &lfs->fs;
 	memcpy(&lfs->fs, &lfs_fs, sizeof(FSCTRL));
 	memcpy(&lfs->fc, &lfs_fc, sizeof(FCPEB));
+	//printk("L2.");
 	lfs->fs.data = lfs;
 	lfs->fc.data = lfs;
 	lfs->my_path.data = lfs->root;
@@ -1191,11 +1182,10 @@ int lfs_open(const wchar_t * path){
 			lfs->map_path = lfs->_map_path;
 		}
 	else{
-		printk("%P,%P.%P,%P.\n",&lfs->info.g_disk,&init_msg.DiskGUID,&lfs->info.g_id,&init_msg.PartGUID);
-		wcscpy(lfs->_map_path, L"/fs/lfs/");
+		wsprintf(lfs->_map_path,L"/fs/%d/",lfs->info.soft_id);
 		lfs->map_path = lfs->_map_path;
 	}
-	
+	//printk("L3.");
 	lfs->vaild = 1;
 	lfs->file_table = alloc_file_table();
 	fs_map(lfs->map_path, &lfs->my_path, &lfs->f_path);

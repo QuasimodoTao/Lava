@@ -68,7 +68,7 @@ static int ahci_int_handle(struct _PCIDEV_ * dev,struct _AHCI_ * ahci,u16 pci_st
 	int i;
 	
 	is = ahci->hba->is;
-	ahci->hba->is = 0xffffffff;
+	ahci->hba->is = is;
 	for(i = 0;i < ahci->port_count;i++,is >>= 1)
 		if((is & 1) && ahci->ctrl[i]) 
 			ata_on_ahci_int_handle(ahci,ahci->ctrl[i]);

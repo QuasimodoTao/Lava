@@ -110,3 +110,21 @@ int stamp2time(struct time_t * time,u64 stamp){
 	time->month = month;
 	return 0;
 }
+struct tm * localtime(stamp64_t * time){
+	struct tm _tm;
+	struct time_t __tm;
+
+	stamp2time(&__tm,*time);
+	_tm.tm_sec = __tm.second;
+	_tm.tm_min = __tm.minute;
+	_tm.tm_hour = __tm.hour;
+	_tm.tm_mday = __tm.day;
+	_tm.tm_mon = __tm.month;
+	_tm.tm_year = __tm.year;
+	_tm.tm_wday = __tm.week;
+	_tm.tm_yday = days[__tm.month] + __tm.day;
+	_tm.tm_isdst = -1;
+	_tm.tm_gmtoff = 0;
+	_tm.tm_zone = NULL;
+	return &_tm;
+}

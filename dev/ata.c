@@ -240,9 +240,13 @@ static int ata_deal_cmd_list(struct _ATA_ * ata,struct _ATA_CMD_ * cmd_list){
 	cmd_list = uter;
 	if(ata->type == ATA_TYPE_AHCI){
 		for(i = 0;i < ata->ahci.solts && cmd_list;i++){
+			if(ata->ahci.ci & (1 << i)) continue;
 			cur = cmd_list;
+			//printk("LBA:%lld,%P.",cur->lba,cur->buf);
 			cmd_list = cmd_list->next;
 			ata->ahci.wait[i] = cur->wait;
+			memset(&fis,0,sizeof(fis));
+			memset(&item,0,sizeof(item));
 			fis.type = 0x27;
 			fis.pmp = 0;
 			fis.c = 1;
@@ -262,27 +266,31 @@ static int ata_deal_cmd_list(struct _ATA_ * ata,struct _ATA_CMD_ * cmd_list){
 			item.dba = ADDRV2P(NULL,cur->buf);
 			item.dbc = (uint32_t)cur->cnt * ata->sec_size - 1;
 			item.i = 1;
-			memcpy(&solt,&(ata->ahci.solt[0]),sizeof(solt));
-			solt.cfl = sizeof(fis)/sizeof(u32);
+			memcpy(&solt,&(ata->ahci.solt[i]),sizeof(solt));
+			//solt.cfl = sizeof(fis)/sizeof(u32);
 			solt.a = 0;
 			solt.w = cur->direct == CMD_DIRECT_READ ? 0 : 1;
-			solt.p = 0;
+			solt.p = 1;
 			solt.r = 0;
 			solt.b = 0;
 			solt.c = 0;
 			solt.pmp = 0;
-			solt.prdtl = 1;
+			//solt.prdtl = 1;s
 			solt.prdbc = (uint32_t)cur->cnt * ata->sec_size;
 			if(cur->restart){
 				solt.r = 1;
 				solt.c = 1;
 			}
-			memcpy((void*)&(ata->ahci.cmd[0]->r_fis),&fis,sizeof(fis));
-			memcpy((void*)&(ata->ahci.cmd[0]->data_block[0]),&item,sizeof(item));
+			memcpy((void*)&(ata->ahci.cmd[i]->r_fis),&fis,sizeof(fis));
+			memcpy((void*)&(ata->ahci.cmd[i]->data_block[0]),&item,sizeof(item));
 			memcpy((void*)&(ata->ahci.solt[i]),&solt,sizeof(solt));
+
+			//printk("%P,%P,%P.",&(ata->ahci.cmd[i]->r_fis),&(ata->ahci.cmd[i]->data_block[0]),&(ata->ahci.solt[i]));
+
 			ata->ahci.ci |= 1 << i;
 			ata->ahci.h_port->ci |= 1 << i;
 		}
+		//printk("old ci:%08X.",ata->ahci.ci);
 		ata->active_cmd_list = cmd_list;
 	}
 	else{
@@ -368,11 +376,13 @@ static int ata_read_block(struct _BUFFER_HEAD_ * bh){
 	if(!spin_try_lock_bit(&ata->activing,0))//device is not activeing
 		if(ata_deal_cmd_list(ata,xchgq(&ata->cmd_list,NULL))) 
 			return -1;
-	thread->flag = TF_BLOCK;
 	ie = IE();
+	//printk("waiting for read disk finish,%lld.",iblock);
 	cli();
+	thread->flag = TF_BLOCK;
 	schedule_imm();
 	if(ie) sti();
+	//printk("ata_read_block(%P,%lld).",bh,bh->iblock);
 	return 0;
 }
 static int ata_write_block(struct _BUFFER_HEAD_ * bh){
@@ -472,7 +482,7 @@ void * ata_on_ahci_open(struct _AHCI_ * ahci,int port){
 	struct _FIS_REG_D2H_ rfis2;
 	struct _PRDTI_ item;
 	struct _ATA_CMD_ cmd;
-	struct _ATA_CMD_ * _cmd;
+	struct _AHCI_CMD_ * _cmd;
 	
 	{//ata struct init
 		ata = kmalloc(sizeof(struct _ATA_),0);
@@ -500,7 +510,7 @@ void * ata_on_ahci_open(struct _AHCI_ * ahci,int port){
 		ata->ahci.h_port->fb = ADDRV2P(NULL,ata->ahci.fis);
 		memset(&solt,0,sizeof(solt));
 		solt.cfl = sizeof(struct _FIS_REG_H2D_) / sizeof(u32);
-		solt.prdtl = 8;
+		solt.prdtl = 1;
 		addr = ADDRV2P(NULL,ata->ahci.cmd[0]);
 		for(i = 0;i < 16;i++){
 			solt.ctba = addr;
@@ -515,6 +525,8 @@ void * ata_on_ahci_open(struct _AHCI_ * ahci,int port){
 		}
 	}
 	ata->ahci.solts = ((ahci->hba->cap & HBA_CAP_NCS) >> 8) + 1; 
+	if(ata->ahci.solts == 32)ata->ahci.ci = 0;
+	else ata->ahci.ci = 0xffffffff << ata->ahci.solts;
 	if(ahci->hba->cap & HBA_CAP_SPM && //HBA must suppose PMP
 		ahci->hba->cap & HBA_CAP_FBSS &&//HBA must suppose FIS-base switch if want to suppose PMP
 		ata->ahci.h_port->cmd & HBA_PxCMD_FBSCP) //Port must suppose FIS-base switch is want to suppose PMP
@@ -582,16 +594,18 @@ int ata_on_ahci_int_handle(struct _AHCI_ * ahci,void * _ata){
 
 	ata = _ata;
 	is = ata->ahci.h_port->is;
-	ata->ahci.h_port->is = 0xffffffff;
+	ata->ahci.h_port->is = is;
+	//printk("IS:%08X.",is);
 	if(is & (HBA_PxIS_DHRS | HBA_PxIS_PSS | HBA_PxIS_DSS | HBA_PxIS_SDBS)){
 		//recive a FIS
 		ci = ata->ahci.h_port->ci;
 		ci ^= ata->ahci.ci;
-		ata->ahci.ci ^= ci;
+		lock_andd(&ata->ahci.ci,~ci);
 		if(!ci){
 			//command on error;
 		}
 		else {
+			//printk("ci:%08X.",ci);
 			_ci = ci;
 			for(i = 0;i < ata->ahci.solts;i++,ci >>= 1)
 				if(ci & 0x01) wake_up(ata->ahci.wait[i]);

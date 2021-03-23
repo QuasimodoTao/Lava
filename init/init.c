@@ -140,8 +140,8 @@ int test_thread(void * none){
 		if(write(test_file,256,tmp)) printk("write file fail.\n");
 		close(test_file);
 	}
-	shut_down(0);
 	while(1) halt();
+	shut_down(0);
 }
 int test_thread2(void * none){
 	int i = 0;
